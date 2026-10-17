@@ -1,0 +1,87 @@
+{#
+  Shared SMS-code steps for the login and sign-up pages.
+  Include with:  {% set otp_action = url_for(...) %}{% include 'auth/_otp_steps.html' %}
+  Needs (from routes): otp_step ('code' | 'choose'), otp_phone_masked, otp_wait,
+  otp_accounts, otp_test_mode. Optional: otp_verify_label.
+#}
+<style>
+.otp-box{text-align:left}
+.otp-sent{font-size:14px;color:#334155;margin:0 0 18px;line-height:1.55}
+.otp-sent strong{color:#002366;white-space:nowrap}
+.otp-sent a{color:#002366;font-weight:600;margin-left:6px}
+.otp-code{width:100%;font:600 26px/1 'Inter',ui-monospace,monospace;letter-spacing:.5em;text-align:center;
+  padding:14px 0 14px .5em;border:1.5px solid #cbd5e1;border-radius:12px;outline:none;background:#fff;color:#0f172a}
+.otp-code:focus{border-color:#002366;box-shadow:0 0 0 3px rgba(0,35,102,.12)}
+.otp-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:14px 0 20px;font-size:13px;color:#64748b}
+.otp-link{all:unset;cursor:pointer;color:#002366;font-weight:600;font-size:13px}
+.otp-link:disabled{cursor:default;color:#94a3b8;font-weight:500}
+.otp-link:focus-visible{outline:2px solid #002366;outline-offset:2px;border-radius:4px}
+.otp-test{background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:10px;padding:10px 12px;font-size:12.5px;margin-bottom:16px;line-height:1.5}
+.otp-acc{display:flex;flex-direction:column;gap:10px;margin:4px 0 18px}
+.otp-acc button{all:unset;box-sizing:border-box;width:100%;cursor:pointer;display:flex;align-items:center;gap:12px;
+  padding:12px 14px;border:1.5px solid #e2e8f0;border-radius:12px;background:#fff}
+.otp-acc button:hover,.otp-acc button:focus-visible{border-color:#002366;box-shadow:0 0 0 3px rgba(0,35,102,.1)}
+.otp-acc .av{width:38px;height:38px;border-radius:50%;background:#002366;color:#fff;display:grid;place-items:center;font-weight:700;flex-shrink:0}
+.otp-acc .nm{font-weight:600;color:#0f172a;font-size:14px}
+.otp-acc .dt{font-size:12.5px;color:#64748b}
+.otp-acc .rl{margin-left:auto;font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:999px;background:#eff6ff;color:#0369a1}
+</style>
+
+<div class="otp-box">
+{% if otp_step == 'code' %}
+  <p class="otp-sent">Enter the 6-digit code we sent to <strong>{{ otp_phone_masked }}</strong>
+    <a href="{{ otp_action }}">Change number</a></p>
+  {% if otp_test_mode %}
+  <div class="otp-test"><i class="fas fa-flask"></i> Test mode: no SMS is sent. The code is printed in the window where the app is running. Set <code>SMS_PROVIDER</code> in <code>.env</code> to send real SMS.</div>
+  {% endif %}
+  <form method="POST" action="{{ otp_action }}" id="otpVerifyForm" novalidate>
+    <input type="hidden" name="action" value="verify">
+    <label for="otpCode" class="sr-only" style="position:absolute;left:-9999px">6-digit code</label>
+    <input class="otp-code" id="otpCode" name="code" type="text" inputmode="numeric" pattern="[0-9]*"
+           autocomplete="one-time-code" maxlength="6" placeholder="••••••" required autofocus>
+    <div class="otp-row">
+      <span>Didn't get it?</span>
+      <button type="submit" class="otp-link" id="otpResend" form="otpResendForm" {% if otp_wait %}disabled{% endif %}
+              data-wait="{{ otp_wait }}">Resend code{% if otp_wait %} in {{ otp_wait }}s{% endif %}</button>
+    </div>
+    <button type="submit" class="btn-auth" id="otpVerifyBtn">
+      <span>{{ otp_verify_label or 'Verify & sign in' }}</span> <i class="fas fa-arrow-right"></i>
+    </button>
+  </form>
+  <form method="POST" action="{{ otp_action }}" id="otpResendForm" style="display:none">
+    <input type="hidden" name="action" value="resend">
+  </form>
+  <script>
+  (function(){
+    var inp=document.getElementById('otpCode'), form=document.getElementById('otpVerifyForm'),
+        btn=document.getElementById('otpVerifyBtn'), rs=document.getElementById('otpResend'), sent=false;
+    inp.addEventListener('input',function(){
+      var v=inp.value.replace(/\D/g,'').slice(0,6); if(inp.value!==v) inp.value=v;
+      if(v.length===6 && !sent){ sent=true; btn.disabled=true; form.submit(); }   // auto-submit, incl. SMS autofill
+    });
+    form.addEventListener('submit',function(e){
+      if(inp.value.replace(/\D/g,'').length!==6){ e.preventDefault(); inp.focus(); inp.style.borderColor='#dc2626'; return; }
+      sent=true; btn.disabled=true;
+    });
+    var left=parseInt(rs.dataset.wait||'0',10);
+    if(left>0){ var t=setInterval(function(){ left--; if(left<=0){ clearInterval(t); rs.disabled=false; rs.textContent='Resend code'; }
+      else rs.textContent='Resend code in '+left+'s'; },1000); }
+    rs.addEventListener('click',function(){ setTimeout(function(){ rs.disabled=true; },0); });
+  })();
+  </script>
+
+{% elif otp_step == 'choose' %}
+  <p class="otp-sent">This number is linked to more than one account. Which one do you want to sign in to?</p>
+  <form method="POST" action="{{ otp_action }}" class="otp-acc">
+    <input type="hidden" name="action" value="choose">
+    {% for a in otp_accounts %}
+    <button type="submit" name="user_id" value="{{ a.id }}">
+      <span class="av">{{ (a.name or '?')[0]|upper }}</span>
+      <span><span class="nm">{{ a.name }}</span><br><span class="dt">{{ a.detail }}</span></span>
+      <span class="rl">{{ a.role }}</span>
+    </button>
+    {% endfor %}
+  </form>
+  <div style="text-align:center;font-size:13px"><a href="{{ otp_action }}" style="color:#002366;font-weight:600">Use a different number</a></div>
+{% endif %}
+</div>
