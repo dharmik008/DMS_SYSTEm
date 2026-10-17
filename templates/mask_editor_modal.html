@@ -1,0 +1,636 @@
+{# MASK EDITOR MODAL — Vehicle Image Editor (Blur BG + Hide Number Plate) #}
+{# Usage: {% include 'mask_editor_modal.html' %} in any admin template        #}
+{# JS API: openMaskEditor(viId, imgUrl, imgFilename, imageType)               #}
+{#         maskEditorOnSave(viId, newImageUrl)  — define this in parent page  #}
+
+<div id="maskEditorOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.90);backdrop-filter:blur(8px);z-index:9000;align-items:center;justify-content:center;padding:12px;">
+  <div style="background:#111827;border-radius:20px;max-width:980px;width:100%;max-height:95vh;overflow-y:auto;display:flex;flex-direction:column;gap:0;box-shadow:0 24px 80px rgba(0,0,0,0.6);">
+
+    <!-- Header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 24px 14px;border-bottom:1px solid rgba(255,255,255,0.08);">
+      <div>
+        <div style="font-size:1rem;font-weight:800;color:#fff;">🎨 Vehicle Image Editor</div>
+        <div id="meFileName" style="font-size:.75rem;color:#94a3b8;margin-top:2px;"></div>
+      </div>
+      <button onclick="closeMaskEditor()" style="background:rgba(255,255,255,0.08);border:none;color:#fff;width:36px;height:36px;border-radius:50%;font-size:20px;cursor:pointer;line-height:1;">✕</button>
+    </div>
+
+    <!-- Body -->
+    <div style="padding:20px 24px;display:flex;flex-direction:column;gap:18px;">
+
+      <!-- Action Buttons Row -->
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button id="meBlurBtn" onclick="meDoBlurBg()" class="me-action-btn" style="background:#059669;color:#fff;">
+          🌫️ Blur Background
+        </button>
+        <button id="mePlateBtn" onclick="meOpenPlateModal()" class="me-action-btn" style="background:#f59e0b;color:#111;">
+          🎯 Draw &amp; Hide Plate
+        </button>
+        <button id="mePlateBlurBtn" onclick="meDoPlateAndBlur()" class="me-action-btn" style="background:#7c3aed;color:#fff;">
+          ✨ Number Plate + Blur
+        </button>
+        <button id="meSaveBtn" onclick="meSaveBack()" class="me-action-btn" style="background:#1B4FD8;color:#fff;" disabled>
+          💾 Save to Vehicle
+        </button>
+        <button onclick="meResetToOriginal()" class="me-action-btn" style="background:rgba(255,255,255,0.07);color:#94a3b8;border:1px solid rgba(255,255,255,0.12);">
+          ↩ Reset
+        </button>
+      </div>
+
+      <!-- Status Bar -->
+      <div id="meStatusBar" style="display:none;padding:10px 16px;border-radius:10px;font-size:.82rem;font-weight:600;background:rgba(27,79,216,0.15);color:#93c5fd;border:1px solid rgba(27,79,216,0.3);">
+        Ready
+      </div>
+
+      <!-- Image Preview -->
+      <div style="position:relative;border-radius:14px;overflow:hidden;background:#0f172a;min-height:220px;display:flex;align-items:center;justify-content:center;">
+        <img id="meOriginalImg" src="" alt="Original" style="display:none;max-width:100%;max-height:60vh;object-fit:contain;border-radius:10px;z-index:2;position:relative;">
+        <img id="meProcessedImg" src="" alt="Processed" style="display:none;max-width:100%;max-height:60vh;object-fit:contain;border-radius:10px;z-index:2;position:relative;">
+        <div id="meImgPlaceholder" style="color:#475569;font-size:.9rem;">Loading image…</div>
+        <!-- Blur Progress Overlay -->
+        <div id="meBlurProgress" style="display:none;position:absolute;inset:0;background:rgba(0,0,0,0.72);z-index:20;flex-direction:column;align-items:center;justify-content:center;gap:16px;border-radius:14px;">
+          <div style="width:54px;height:54px;border:4px solid rgba(255,255,255,0.15);border-top-color:#10b981;border-radius:50%;animation:meSpin .8s linear infinite;"></div>
+          <div id="meBlurProgressTxt" style="color:#f1f5f9;font-size:.88rem;font-weight:700;text-align:center;line-height:1.5;">🤖 AI removing background…<br><span style="font-size:.75rem;font-weight:400;color:#94a3b8;">Thoda wait karo, yeh 10-20 sec le sakta hai</span></div>
+          <div style="width:180px;height:4px;background:rgba(255,255,255,0.1);border-radius:4px;overflow:hidden;">
+            <div id="meBlurProgressBar" style="height:100%;background:linear-gradient(90deg,#10b981,#3b82f6);border-radius:4px;width:0%;transition:width .4s ease;"></div>
+          </div>
+        </div>
+        <!-- Before/After Toggle -->
+        <div id="meToggleBar" style="display:none;position:absolute;bottom:12px;left:50%;transform:translateX(-50%);background:rgba(15,23,42,0.85);border-radius:20px;padding:4px;display:flex;gap:2px;z-index:10;backdrop-filter:blur(4px);">
+          <button onclick="meShowView('original')" id="meToggleOrig" class="me-toggle-btn me-toggle-active">Original</button>
+          <button onclick="meShowView('processed')" id="meToggleProc" class="me-toggle-btn">Processed</button>
+        </div>
+      </div>
+
+    </div><!-- /body -->
+  </div>
+</div>
+
+
+<!-- ── PLATE SELECTION MODAL (inside mask editor) ─────────────────────────── -->
+<div id="mePlateOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.60);backdrop-filter:blur(4px);z-index:9500;align-items:center;justify-content:center;padding:12px;">
+  <div style="background:#ffffff;border-radius:18px;max-width:940px;width:100%;max-height:92vh;overflow-y:auto;padding:22px;display:flex;flex-direction:column;gap:14px;box-shadow:0 20px 60px rgba(0,0,0,0.35);scrollbar-width:thin;scrollbar-color:#cbd5e1 #f1f5f9;">
+
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <div style="font-size:.95rem;font-weight:800;color:#1e293b;">🎯 Number Plate Select Karo</div>
+      <button onclick="meClosePlateModal()" style="background:#f1f5f9;border:1px solid #e2e8f0;color:#475569;width:32px;height:32px;border-radius:50%;font-size:18px;cursor:pointer;line-height:1;">✕</button>
+    </div>
+
+    <p id="meHint4pt" style="font-size:.78rem;color:#64748b;">Plate ke <strong style="color:#1e293b;">4 corners</strong> par <strong style="color:#1e293b;">click</strong> karo — TL → TR → BR → BL order mein.</p>
+
+
+    <!-- Hide mode selector -->
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <span style="font-size:.72rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;">Hide Style:</span>
+      <select id="mePlateModeSelect" style="border:1.5px solid #cbd5e1;border-radius:8px;padding:5px 10px;font-size:.8rem;background:#fff;color:#1e293b;cursor:pointer;">
+        <option value="caryanams">Caryanams Logo</option>
+        <option value="blur">Blur</option>
+        <option value="black">Black Block</option>
+        <option value="white">White Block</option>
+      </select>
+    </div>
+
+    <!-- Canvas wrapper -->
+    <div id="mePCanvasWrap" style="position:relative;display:inline-block;cursor:crosshair;user-select:none;touch-action:none;width:100%;border-radius:10px;">
+      <canvas id="mePCanvas" style="display:block;max-width:100%;border-radius:10px;touch-action:none;"></canvas>
+      <!-- SVG for 4-point mode -->
+      <svg id="mePQuadSvg" style="position:absolute;inset:0;width:100%;height:100%;overflow:visible;display:block;pointer-events:none;">
+        <polygon id="mePQuadPoly" points="" fill="rgba(245,158,11,0.12)" stroke="#F59E0B" stroke-width="2" stroke-dasharray="6,3" pointer-events="none"/>
+        <circle class="mePQpt" id="mePQpt0" r="10" fill="#F59E0B" stroke="#fff" stroke-width="2.5" cursor="move" style="filter:drop-shadow(0 1px 3px rgba(0,0,0,.4));pointer-events:auto" touch-action="none"/>
+        <circle class="mePQpt" id="mePQpt1" r="10" fill="#F59E0B" stroke="#fff" stroke-width="2.5" cursor="move" style="filter:drop-shadow(0 1px 3px rgba(0,0,0,.4));pointer-events:auto" touch-action="none"/>
+        <circle class="mePQpt" id="mePQpt2" r="10" fill="#F59E0B" stroke="#fff" stroke-width="2.5" cursor="move" style="filter:drop-shadow(0 1px 3px rgba(0,0,0,.4));pointer-events:auto" touch-action="none"/>
+        <circle class="mePQpt" id="mePQpt3" r="10" fill="#F59E0B" stroke="#fff" stroke-width="2.5" cursor="move" style="filter:drop-shadow(0 1px 3px rgba(0,0,0,.4));pointer-events:auto" touch-action="none"/>
+        <text id="mePQlbl0" text-anchor="middle" fill="#fff" font-size="11" font-weight="700" pointer-events="none">TL</text>
+        <text id="mePQlbl1" text-anchor="middle" fill="#fff" font-size="11" font-weight="700" pointer-events="none">TR</text>
+        <text id="mePQlbl2" text-anchor="middle" fill="#fff" font-size="11" font-weight="700" pointer-events="none">BR</text>
+        <text id="mePQlbl3" text-anchor="middle" fill="#fff" font-size="11" font-weight="700" pointer-events="none">BL</text>
+      </svg>
+      <!-- Rect selection box -->
+      <div id="mePSelRect" style="display:none;position:absolute;pointer-events:none;">
+        <div id="mePSelDims" style="display:none;"></div>
+      </div>
+    </div>
+
+    <!-- 4pt step bar -->
+    <div id="mePQStepBar" style="display:flex;gap:6px;align-items:center;font-size:12px;">
+      <span id="mePQS0" class="me-qstep me-qstep-active">1 TL</span>
+      <span style="color:#94a3b8">→</span>
+      <span id="mePQS1" class="me-qstep">2 TR</span>
+      <span style="color:#94a3b8">→</span>
+      <span id="mePQS2" class="me-qstep">3 BR</span>
+      <span style="color:#94a3b8">→</span>
+      <span id="mePQS3" class="me-qstep">4 BL</span>
+      <button onclick="mePResetQuad()" style="margin-left:auto;" class="me-plate-mode-btn" style="font-size:11px;padding:3px 10px;">↺ Reset</button>
+    </div>
+
+    <!-- Actions -->
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button id="mePConfirmBtn" disabled onclick="mePConfirmPlate()" class="me-action-btn" style="background:#f59e0b;color:#111;">🔲 Hide Plate</button>
+      <button class="me-action-btn" onclick="meClosePlateModal()" style="background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+
+<style>
+.me-action-btn {
+  display:inline-flex;align-items:center;gap:6px;
+  padding:9px 18px;border-radius:10px;font-size:.82rem;font-weight:700;
+  font-family:inherit;cursor:pointer;border:1.5px solid transparent;
+  transition:opacity .15s,box-shadow .15s;white-space:nowrap;
+}
+.me-action-btn:disabled { opacity:.4;cursor:not-allowed; }
+.me-action-btn:not(:disabled):hover { opacity:.88; }
+.me-toggle-btn {
+  padding:5px 14px;border-radius:16px;font-size:.75rem;font-weight:700;
+  font-family:inherit;cursor:pointer;border:none;background:transparent;color:#64748b;
+  transition:background .15s,color .15s;
+}
+.me-toggle-btn.me-toggle-active { background:rgba(27,79,216,.8);color:#fff; }
+.me-plate-mode-btn {
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  padding:7px 14px;border-radius:8px;font-size:.78rem;font-weight:700;
+  font-family:inherit;cursor:pointer;border:1.5px solid #F59E0B;
+  background:#F59E0B;color:#111;transition:opacity .15s;
+}
+.me-plate-mode-btn:hover { opacity:.88; }
+.meSelHandle {
+  position:absolute;width:10px;height:10px;
+  background:#fff;border:2px solid #1B4FD8;border-radius:2px;
+}
+.me-qstep {
+  display:inline-flex;align-items:center;justify-content:center;
+  width:44px;height:24px;border-radius:20px;font-size:.72rem;font-weight:800;
+  background:rgba(255,255,255,0.06);color:#64748b;border:1.5px solid #334155;
+}
+.me-qstep.me-qstep-active { background:#F59E0B;color:#111; }
+.me-qstep.me-qstep-done   { background:#059669;color:#fff; }
+</style>
+
+<script>
+// ════════════════════════════════════════════════════════════════════
+// MASK EDITOR STATE
+// ════════════════════════════════════════════════════════════════════
+let _meViId          = null;
+let _meOriginalUrl   = null;
+let _meProcessedUrl  = null;  // current working image (after blur/plate ops)
+let _meHasProcessed  = false;
+let _meProcessing    = false;
+let _mePlateBlurPending = false;
+
+// Plate modal state
+let _mePMode         = '4pt';
+let _mePQpts         = [];
+let _mePQDragIdx     = -1;
+let _mePQClickMoved  = false;
+let _mePQPDownX      = 0, _mePQPDownY = 0;
+let _mePSelBox       = null;
+let _mePSelMode      = null;
+let _mePSelSnap      = null;
+let _mePNatW         = 1, _mePNatH = 1;
+let _mePManualRect   = null;
+let _mePManualQuad   = null;
+const ME_PLATE_ASPECT = 4.5;
+
+
+// ── Open / Close ─────────────────────────────────────────────────────────────
+function openMaskEditor(viId, imgUrl, imgFilename, imgType) {
+  _meViId         = viId;
+  _meOriginalUrl  = imgUrl;
+  _meProcessedUrl = imgUrl;
+  _meHasProcessed = false;
+  _meProcessing   = false;
+
+  document.getElementById('meFileName').textContent = imgFilename || '';
+  document.getElementById('meStatusBar').style.display = 'none';
+  document.getElementById('meSaveBtn').disabled = true;
+  document.getElementById('meToggleBar').style.display = 'none';
+
+  // Load original image
+  const origEl = document.getElementById('meOriginalImg');
+  const procEl = document.getElementById('meProcessedImg');
+  const placeholder = document.getElementById('meImgPlaceholder');
+  origEl.style.display = 'none';
+  procEl.style.display = 'none';
+  placeholder.style.display = 'block';
+
+  const img = new Image();
+  img.onload = () => {
+    origEl.src  = imgUrl;
+    procEl.src  = imgUrl;
+    origEl.style.display = 'block';
+    placeholder.style.display = 'none';
+    meShowView('original');
+  };
+  img.onerror = () => {
+    placeholder.textContent = '⚠ Could not load image';
+  };
+  img.src = imgUrl;
+
+  document.getElementById('maskEditorOverlay').style.display = 'flex';
+}
+
+function closeMaskEditor() {
+  document.getElementById('maskEditorOverlay').style.display = 'none';
+  meClosePlateModal();
+  _meViId = null; _meOriginalUrl = null; _meProcessedUrl = null;
+  _meHasProcessed = false; _meProcessing = false;
+}
+
+// ── Image view toggle ────────────────────────────────────────────────────────
+function meShowView(which) {
+  const origEl = document.getElementById('meOriginalImg');
+  const procEl = document.getElementById('meProcessedImg');
+  const btnOrig = document.getElementById('meToggleOrig');
+  const btnProc = document.getElementById('meToggleProc');
+
+  if (which === 'processed' && _meHasProcessed) {
+    origEl.style.display = 'none';
+    procEl.style.display = 'block';
+    btnOrig.classList.remove('me-toggle-active');
+    btnProc.classList.add('me-toggle-active');
+  } else {
+    origEl.style.display = 'block';
+    procEl.style.display = 'none';
+    btnOrig.classList.add('me-toggle-active');
+    btnProc.classList.remove('me-toggle-active');
+  }
+}
+
+function meSetStatus(msg, type) {
+  const bar = document.getElementById('meStatusBar');
+  bar.style.display = 'block';
+  bar.textContent = msg;
+  if (type === 'error') {
+    bar.style.background = 'rgba(220,38,38,0.15)';
+    bar.style.color = '#fca5a5';
+    bar.style.borderColor = 'rgba(220,38,38,0.3)';
+  } else if (type === 'success') {
+    bar.style.background = 'rgba(5,150,105,0.15)';
+    bar.style.color = '#6ee7b7';
+    bar.style.borderColor = 'rgba(5,150,105,0.3)';
+  } else {
+    bar.style.background = 'rgba(27,79,216,0.15)';
+    bar.style.color = '#93c5fd';
+    bar.style.borderColor = 'rgba(27,79,216,0.3)';
+  }
+}
+
+function meSetLoading(btnId, on, label) {
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  btn.disabled = on;
+  if (on) btn.innerHTML = '<span style="display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:meSpin .6s linear infinite;flex-shrink:0;margin-right:4px;"></span> Processing…';
+  else    btn.innerHTML = label;
+}
+
+// ── Reset ────────────────────────────────────────────────────────────────────
+function meResetToOriginal() {
+  if (!_meOriginalUrl) return;
+  _meProcessedUrl = _meOriginalUrl;
+  _meHasProcessed = false;
+  document.getElementById('meProcessedImg').src = _meOriginalUrl;
+  document.getElementById('meToggleBar').style.display = 'none';
+  document.getElementById('meSaveBtn').disabled = true;
+  meShowView('original');
+  meSetStatus('Reset to original image.', 'info');
+}
+
+// ════════════════════════════════════════════════════════════════════
+// BLUR BACKGROUND
+// ════════════════════════════════════════════════════════════════════
+async function meDoBlurBg() {
+  if (!_meViId || _meProcessing) return;
+  _meProcessing = true;
+  meSetLoading('meBlurBtn', true, '');
+  meSetStatus('⏳ Blurring background (AI BG removal + depth blur)…');
+
+  // Show progress overlay with animated progress bar
+  const prog = document.getElementById('meBlurProgress');
+  const progBar = document.getElementById('meBlurProgressBar');
+  const progTxt = document.getElementById('meBlurProgressTxt');
+  prog.style.display = 'flex';
+  progBar.style.width = '0%';
+
+  // Animate progress bar through stages
+  const steps = [
+    { pct: 15, delay: 400,  txt: '🤖 AI removing background…<br><span style="font-size:.75rem;font-weight:400;color:#94a3b8;">Thoda wait karo, yeh 10-20 sec le sakta hai</span>' },
+    { pct: 35, delay: 2500, txt: '✂️ Car mask clean kar rahe hain…<br><span style="font-size:.75rem;font-weight:400;color:#94a3b8;">Edges refine ho rahi hain</span>' },
+    { pct: 60, delay: 5000, txt: '🌫️ Background blur apply ho raha hai…<br><span style="font-size:.75rem;font-weight:400;color:#94a3b8;">Depth-of-field effect ban raha hai</span>' },
+    { pct: 80, delay: 8000, txt: '🎨 Final image render ho rahi hai…<br><span style="font-size:.75rem;font-weight:400;color:#94a3b8;">Almost done!</span>' },
+    { pct: 92, delay: 12000, txt: '⏳ Almost complete…<br><span style="font-size:.75rem;font-weight:400;color:#94a3b8;">Bas kuch second aur…</span>' },
+  ];
+  const timers = steps.map(s => setTimeout(() => {
+    progBar.style.width = s.pct + '%';
+    progTxt.innerHTML = s.txt;
+  }, s.delay));
+
+  try {
+    const r = await fetch(`/admin/api/vehicles/images/${_meViId}/blur-bg`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({})
+    });
+    timers.forEach(t => clearTimeout(t));
+    progBar.style.width = '100%';
+    const d = await r.json();
+    setTimeout(() => { prog.style.display = 'none'; progBar.style.width = '0%'; }, 500);
+    if (d.success) {
+      _meProcessedUrl = d.processed_url + '?t=' + Date.now();
+      _meHasProcessed = true;
+      document.getElementById('meProcessedImg').src = _meProcessedUrl;
+      document.getElementById('meToggleBar').style.display = 'flex';
+      document.getElementById('meSaveBtn').disabled = false;
+      meShowView('processed');
+      meSetStatus('✅ Background blurred! Review then click "Save to Vehicle".', 'success');
+    } else {
+      meSetStatus('⚠ ' + (d.error || 'Blur failed'), 'error');
+    }
+  } catch(e) {
+    timers.forEach(t => clearTimeout(t));
+    prog.style.display = 'none';
+    meSetStatus('❌ Error: ' + e.message, 'error');
+  }
+  _meProcessing = false;
+  meSetLoading('meBlurBtn', false, '🌫️ Blur Background');
+}
+
+// ════════════════════════════════════════════════════════════════════
+// NUMBER PLATE + BLUR (combined: first hide plate, then blur bg)
+// ════════════════════════════════════════════════════════════════════
+function meDoPlateAndBlur() {
+  // Step 1: Open plate modal. After plate is hidden, blur will auto-trigger.
+  _mePlateBlurPending = true;
+  meOpenPlateModal();
+}
+
+// ════════════════════════════════════════════════════════════════════
+// SAVE BACK TO VEHICLE IMAGE
+// ════════════════════════════════════════════════════════════════════
+async function meSaveBack() {
+  if (!_meViId || !_meHasProcessed || !_meProcessedUrl) return;
+  meSetLoading('meSaveBtn', true, '');
+  meSetStatus('💾 Saving processed image to vehicle…');
+  try {
+    const r = await fetch(`/admin/api/vehicles/images/${_meViId}/save-processed`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ processed_url: _meProcessedUrl })
+    });
+    const d = await r.json();
+    if (d.success) {
+      meSetStatus('✅ Saved! Image updated on vehicle.', 'success');
+      if (typeof maskEditorOnSave === 'function') {
+        maskEditorOnSave(_meViId, d.image_url || _meProcessedUrl);
+      }
+    } else {
+      meSetStatus('⚠ ' + (d.error || 'Save failed'), 'error');
+    }
+  } catch(e) {
+    meSetStatus('❌ Error: ' + e.message, 'error');
+  }
+  meSetLoading('meSaveBtn', false, '💾 Save to Vehicle');
+}
+
+// ════════════════════════════════════════════════════════════════════
+// PLATE MODAL — Open / Close
+// ════════════════════════════════════════════════════════════════════
+function meOpenPlateModal() {
+  if (!_meViId) return;
+  const overlay = document.getElementById('mePlateOverlay');
+  overlay.style.display = 'flex';
+  mePSetMode('4pt');
+  mePResetQuad();
+  document.getElementById('mePSelRect').style.display = 'none';
+  document.getElementById('mePConfirmBtn').disabled = true;
+
+  // Draw the current working image onto the plate canvas
+  const srcUrl = _meProcessedUrl || _meOriginalUrl;
+  const canvas = document.getElementById('mePCanvas');
+  const ctx = canvas.getContext('2d');
+  const image = new Image(); image.crossOrigin = 'anonymous';
+  image.src = srcUrl;
+  image.onload = async () => {
+    _mePNatW = image.width; _mePNatH = image.height;
+    const maxW = Math.min(window.innerWidth * .82, 860);
+    const scale = maxW / image.width;
+    canvas.width  = image.width  * scale;
+    canvas.height = image.height * scale;
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    // No auto-detect — user clicks to place 4 corner dots manually
+  };
+}
+
+function meClosePlateModal() {
+  document.getElementById('mePlateOverlay').style.display = 'none';
+  _mePManualRect = null; _mePManualQuad = null;
+  _mePSelBox = null; _mePSelMode = null;
+  _mePlateBlurPending = false;
+  mePResetQuad();
+}
+
+// ════════════════════════════════════════════════════════════════════
+// PLATE MODAL — Mode switching
+// ════════════════════════════════════════════════════════════════════
+function mePSetMode(m) {
+  _mePMode = '4pt'; // always 4pt only
+  document.getElementById('mePQStepBar').style.display = 'flex';
+  document.getElementById('mePQuadSvg').style.display  = 'block';
+  document.getElementById('mePSelRect').style.display  = 'none';
+  mePResetQuad();
+  document.getElementById('mePConfirmBtn').disabled = true;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// PLATE MODAL — 4-Point Quad Mode
+// ════════════════════════════════════════════════════════════════════
+function mePResetQuad() {
+  _mePQpts=[]; _mePQDragIdx=-1;
+  mePUpdateQuadSvg(); mePUpdateQSteps();
+  document.getElementById('mePConfirmBtn').disabled = true;
+}
+
+function mePUpdateQSteps() {
+  for (let i=0; i<4; i++) {
+    const el = document.getElementById('mePQS'+i);
+    if (!el) continue;
+    if (i < _mePQpts.length)      el.className = 'me-qstep me-qstep-done';
+    else if (i===_mePQpts.length) el.className = 'me-qstep me-qstep-active';
+    else                          el.className = 'me-qstep';
+  }
+}
+
+function mePUpdateQuadSvg() {
+  for (let i=0; i<4; i++) {
+    const c  = document.getElementById('mePQpt'+i);
+    const lb = document.getElementById('mePQlbl'+i);
+    if (!c || !lb) continue;
+    if (i < _mePQpts.length) {
+      c.setAttribute('cx', _mePQpts[i].x); c.setAttribute('cy', _mePQpts[i].y);
+      lb.setAttribute('x', _mePQpts[i].x); lb.setAttribute('y', _mePQpts[i].y + 4);
+      c.style.display='block'; lb.style.display='block';
+    } else { c.style.display='none'; lb.style.display='none'; }
+  }
+  const poly = document.getElementById('mePQuadPoly');
+  if (!poly) return;
+  if (_mePQpts.length===4) { poly.setAttribute('points', _mePQpts.map(p=>p.x+','+p.y).join(' ')); poly.style.display='block'; }
+  else { poly.style.display='none'; }
+}
+
+function mePSetManualFromQuad() {
+  const xs=_mePQpts.map(p=>p.x), ys=_mePQpts.map(p=>p.y);
+  const canvas = document.getElementById('mePCanvas');
+  const sx=_mePNatW/canvas.width, sy=_mePNatH/canvas.height;
+  _mePManualRect = { x:Math.round(Math.min(...xs)*sx), y:Math.round(Math.min(...ys)*sy),
+                     w:Math.round((Math.max(...xs)-Math.min(...xs))*sx),
+                     h:Math.round((Math.max(...ys)-Math.min(...ys))*sy) };
+  _mePManualQuad = _mePQpts.map(p=>({ x:Math.round(p.x*sx), y:Math.round(p.y*sy) }));
+}
+
+// 4pt canvas events
+const _mePCanvas = document.getElementById('mePCanvas');
+if (_mePCanvas) {
+  _mePCanvas.addEventListener('pointerdown', e => {
+    if (_mePMode!=='4pt') return;
+    _mePQClickMoved=false; _mePQPDownX=e.clientX; _mePQPDownY=e.clientY;
+  });
+  _mePCanvas.addEventListener('pointermove', e => {
+    if (_mePMode!=='4pt') return;
+    if (Math.hypot(e.clientX-_mePQPDownX, e.clientY-_mePQPDownY)>5) _mePQClickMoved=true;
+  });
+  _mePCanvas.addEventListener('click', e => {
+    if (_mePMode!=='4pt'||_mePQClickMoved||_mePQDragIdx>=0) return;
+    if (_mePQpts.length>=4) return;
+    const r=_mePCanvas.getBoundingClientRect();
+    _mePQpts.push({x:e.clientX-r.left, y:e.clientY-r.top});
+    mePUpdateQuadSvg(); mePUpdateQSteps();
+    if (_mePQpts.length===4) { mePSetManualFromQuad(); document.getElementById('mePConfirmBtn').disabled=false; }
+  });
+}
+
+// Drag quad points
+for (let i=0; i<4; i++) {
+  const c = document.getElementById('mePQpt'+i);
+  if (!c) continue;
+  ((_i) => {
+    c.addEventListener('pointerdown', e => {
+      if (_mePMode!=='4pt'||!_mePQpts[_i]) return;
+      e.preventDefault(); e.stopPropagation(); _mePQDragIdx=_i; _mePQClickMoved=true; c.setPointerCapture(e.pointerId);
+    });
+    c.addEventListener('pointermove', e => {
+      if (_mePQDragIdx!==_i) return;
+      e.preventDefault();
+      const canvas=document.getElementById('mePCanvas');
+      const r=canvas.getBoundingClientRect();
+      _mePQpts[_i]={x:Math.max(0,Math.min(canvas.width,e.clientX-r.left)), y:Math.max(0,Math.min(canvas.height,e.clientY-r.top))};
+      mePUpdateQuadSvg();
+      if (_mePQpts.length===4) mePSetManualFromQuad();
+    });
+    c.addEventListener('pointerup', e => { e.preventDefault(); _mePQDragIdx=-1; });
+    c.addEventListener('pointercancel', () => { _mePQDragIdx=-1; });
+  })(i);
+}
+
+// ════════════════════════════════════════════════════════════════════
+// PLATE MODAL — Rectangle Mode
+// ════════════════════════════════════════════════════════════════════
+function mePClampBox({x,y,w,h}) {
+  const canvas=document.getElementById('mePCanvas');
+  const cw=canvas.width, ch=canvas.height;
+  w=Math.max(20,Math.min(w,cw)); h=Math.max(6,Math.min(h,ch));
+  x=Math.max(0,Math.min(x,cw-w)); y=Math.max(0,Math.min(y,ch-h));
+  return {x,y,w,h};
+}
+
+function mePRenderSel() {
+  const selRect=document.getElementById('mePSelRect');
+  if (!_mePSelBox) { selRect.style.display='none'; return; }
+  // In 4pt mode we don't show the blue rect box — quad SVG handles visuals
+  selRect.style.display='none';
+  const canvas=document.getElementById('mePCanvas');
+  const {x,y,w,h}=_mePSelBox;
+  const sx=_mePNatW/canvas.width, sy=_mePNatH/canvas.height;
+  const rw=Math.round(w*sx), rh=Math.round(h*sy);
+  _mePManualRect={x:Math.round(x*sx),y:Math.round(y*sy),w:rw,h:rh};
+}
+
+function mePShowSelRect(x,y,w,h) {
+  // Auto-detected plate: show as 4-point quad (no blue box)
+  _mePSelBox=mePClampBox({x,y,w,h});
+  const canvas=document.getElementById('mePCanvas');
+  const sx=_mePNatW/canvas.width, sy=_mePNatH/canvas.height;
+  const rw=Math.round(w*sx), rh=Math.round(h*sy);
+  _mePManualRect={x:Math.round(x*sx),y:Math.round(y*sy),w:rw,h:rh};
+  _mePManualQuad=null;
+  // Place 4 corner dots on detected rect
+  const pts=[{x:x,y:y},{x:x+w,y:y},{x:x+w,y:y+h},{x:x,y:y+h}];
+  _mePQpts=pts;
+  mePUpdateQuadSvg();
+  mePUpdateQSteps();
+  document.getElementById('mePConfirmBtn').disabled=false;
+}
+
+function mePPtrXY(e) {
+  const canvas=document.getElementById('mePCanvas');
+  const r=canvas.getBoundingClientRect();
+  const src=e.touches?e.touches[0]:(e.changedTouches?e.changedTouches[0]:e);
+  return {x:src.clientX-r.left, y:src.clientY-r.top};
+}
+
+const _mePSelSX=0, _mePSelSY=0;
+
+
+// ════════════════════════════════════════════════════════════════════
+// PLATE MODAL — Confirm (call backend, update working image)
+// ════════════════════════════════════════════════════════════════════
+async function mePConfirmPlate() {
+  if (!_meViId || (!_mePManualRect && !(_mePManualQuad && _mePManualQuad.length===4))) return;
+  document.getElementById('mePConfirmBtn').disabled = true;
+  document.getElementById('mePConfirmBtn').innerHTML = '<span style="display:inline-block;width:12px;height:12px;border:2px solid rgba(0,0,0,.3);border-top-color:#000;border-radius:50%;animation:meSpin .6s linear infinite;margin-right:4px;"></span> Hiding…';
+
+  try {
+    const body = {
+      mode:   document.getElementById('mePlateModeSelect').value,
+      manual: _mePManualRect,
+      quad:   (_mePManualQuad && _mePManualQuad.length===4) ? _mePManualQuad : null,
+      use_processed: _meHasProcessed  // tell server to use already-processed image if available
+    };
+    const r = await fetch(`/admin/api/vehicles/images/${_meViId}/apply-plate`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if (d.success) {
+      _meProcessedUrl = d.processed_url + '?t=' + Date.now();
+      _meHasProcessed = true;
+      document.getElementById('meProcessedImg').src = _meProcessedUrl;
+      document.getElementById('meToggleBar').style.display = 'flex';
+      document.getElementById('meSaveBtn').disabled = false;
+      meShowView('processed');
+      meClosePlateModal();
+      if (_mePlateBlurPending) {
+        _mePlateBlurPending = false;
+        meSetStatus('✅ Plate hidden! Ab background blur ho raha hai…', 'success');
+        setTimeout(() => meDoBlurBg(), 300);
+      } else {
+        meSetStatus('✅ Plate hidden! Review then click "Save to Vehicle".', 'success');
+      }
+    } else {
+      meSetStatus('⚠ ' + (d.message || 'Plate apply failed'), 'error');
+    }
+  } catch(e) {
+    meSetStatus('❌ Error: ' + e.message, 'error');
+  }
+  document.getElementById('mePConfirmBtn').disabled = false;
+  document.getElementById('mePConfirmBtn').innerHTML = '🔲 Hide Plate';
+}
+
+// ── Spinner keyframes
+if (!document.getElementById('meSpinStyle')) {
+  const s=document.createElement('style');
+  s.id='meSpinStyle';
+  s.textContent='@keyframes meSpin{to{transform:rotate(360deg)}}';
+  document.head.appendChild(s);
+}
+</script>
