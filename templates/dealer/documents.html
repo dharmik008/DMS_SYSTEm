@@ -1,0 +1,332 @@
+{% extends "dealer/base.html" %}
+{% block title %}Documents — Caryanams{% endblock %}
+{% block page_title %}Document Management{% endblock %}
+
+{% block content %}
+
+{# ── Stats row ── #}
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:16px;margin-bottom:24px;">
+  <div class="stat-card">
+    <div class="stat-icon"><i class="fas fa-folder-open"></i></div>
+    <div class="stat-info">
+      <div class="stat-value">{{ documents|length }}</div>
+      <div class="stat-label">My Uploads</div>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:rgba(99,102,241,.15);color:#6366f1;"><i class="fas fa-archive"></i></div>
+    <div class="stat-info">
+      <div class="stat-value">{{ cds_docs|length }}</div>
+      <div class="stat-label">Assigned by Admin</div>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:rgba(16,185,129,.15);color:#10b981;"><i class="fas fa-file-alt"></i></div>
+    <div class="stat-info">
+      <div class="stat-value">{{ (documents|length) + (cds_docs|length) }}</div>
+      <div class="stat-label">Total Documents</div>
+    </div>
+  </div>
+</div>
+
+<div class="grid-2 mb-24">
+  {# ── Upload Form ── #}
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><i class="fas fa-upload" style="margin-right:8px;color:var(--gold-accent)"></i>Upload Document</div>
+    </div>
+    <div class="card-body">
+      <form method="POST" action="{{ url_for('dealer.upload_document') }}" enctype="multipart/form-data">
+        {# Vehicle first: choosing one fills the owner name below from the
+           seller recorded on Add Vehicle, so it rarely has to be typed. #}
+        <div class="form-group mb-16">
+          <label>Related Vehicle</label>
+          <select name="vehicle_id" id="docVehicle" onchange="docFillOwner()">
+            <option value="">Not vehicle-specific</option>
+            {% for v in vehicles %}
+            <option value="{{ v['id'] }}" data-owner="{{ v.get('seller_name') or '' }}">
+              {% if v.registration_number %}{{ v.registration_number }} — {% endif %}{{ v.year }} {{ v['make'] }} {{ v['model'] }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group mb-16">
+          <label>Customer / Owner Name</label>
+          <input type="text" name="customer_name" id="docOwner" placeholder="Associated person name">
+          <small id="docOwnerHint" style="display:none;font-size:11px;color:var(--text-muted)">
+            Filled from the vehicle's recorded owner — edit if it should differ.
+          </small>
+        </div>
+        <div class="form-group mb-16">
+          <label>Document Type *</label>
+          <select name="doc_type" required>
+            <option value="">Select Type</option>
+            {% for t in ['RC (Registration Certificate)','Insurance','Aadhar Card','PAN Card','Driving License','NOC','Agreement','Other'] %}
+            <option value="{{ t }}">{{ t }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group mb-16">
+          <label>File * (PDF, JPG, PNG)</label>
+          <input type="file" name="document" accept=".pdf,.jpg,.jpeg,.png" required style="padding:8px">
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%">
+          <i class="fas fa-cloud-upload-alt"></i> Upload Document
+        </button>
+      </form>
+    </div>
+  </div>
+
+  {# ── By Type breakdown ── #}
+  <div style="display:flex;flex-direction:column;gap:16px;">
+    <div class="card">
+      <div class="card-header"><div class="card-title">My Uploads by Type</div></div>
+      <div class="card-body" style="padding:16px">
+        {% for type, docs in documents | groupby('doc_type') %}
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--card-border)">
+          <span style="font-size:13px;font-weight:600;color:var(--navy)">{{ type }}</span>
+          <span class="badge badge-navy">{{ docs | list | length }}</span>
+        </div>
+        {% else %}
+        <p class="text-muted" style="font-size:13px">No documents uploaded yet.</p>
+        {% endfor %}
+      </div>
+    </div>
+    {% if cds_docs %}
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title" style="color:#6366f1;"><i class="fas fa-archive" style="margin-right:6px;"></i>Admin-Assigned by Module</div>
+      </div>
+      <div class="card-body" style="padding:16px">
+        {% for mod, mdocs in cds_docs | groupby('module_name') %}
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--card-border)">
+          <span style="font-size:13px;font-weight:600;color:var(--navy)">{{ mod }}</span>
+          <span class="badge" style="background:#eef2ff;color:#6366f1;">{{ mdocs | list | length }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{# ── Admin-Assigned Documents (CDS) ── #}
+{% if cds_docs %}
+<div class="card mb-24">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-archive" style="margin-right:8px;color:#6366f1;"></i>
+      Documents Assigned by Admin
+      <span class="badge" style="margin-left:8px;background:#eef2ff;color:#6366f1;font-size:12px;">{{ cds_docs|length }}</span>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>File Name</th>
+          <th>Module</th>
+          <th>Type</th>
+          <th>Assigned Date</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for doc in cds_docs %}
+        <tr>
+          <td style="color:var(--text-muted);font-size:12px;">{{ loop.index }}</td>
+          <td>
+            {% set display_name = doc.original_name or doc.file_name %}
+            {% if display_name|length > 40 %}
+              {% set display_name = display_name[:37] + '...' %}
+            {% endif %}
+            <div style="font-weight:600;color:var(--navy)" title="{{ doc.original_name or doc.file_name }}">{{ display_name }}</div>
+          </td>
+          <td>
+            <span class="badge"
+              style="{% if doc.module_name=='KYC' %}background:#dbeafe;color:#1d4ed8;
+              {% elif doc.module_name=='Documents' %}background:#f3e8ff;color:#7c3aed;
+              {% elif doc.module_name=='Vehicles' %}background:#dcfce7;color:#15803d;
+              {% elif doc.module_name=='Deals' %}background:#fef3c7;color:#92400e;
+              {% else %}background:#f1f5f9;color:#64748b;{% endif %}">
+              {{ doc.module_name }}
+            </span>
+          </td>
+          <td style="font-size:13px;color:var(--text-secondary)">{{ doc.document_type or '—' }}</td>
+          <td style="font-size:12px;color:var(--text-secondary)">
+            {{ doc.created_at.strftime('%d %b %Y') if doc.created_at else '—' }}
+          </td>
+          <td>
+            <a href="{{ url_for('static', filename=doc.file_path) }}" target="_blank"
+               class="btn btn-sm btn-outline">
+              <i class="fas fa-download"></i> Download
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{# ── My Uploaded Documents ── #}
+<div class="card">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-folder-open" style="margin-right:8px;"></i>
+      My Uploaded Documents
+      <span class="badge badge-navy" style="margin-left:8px;font-size:12px;">{{ documents|length }}</span>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>#</th><th>Type</th><th>Customer</th><th>Vehicle</th><th>File</th><th>Uploaded</th><th>Action</th></tr>
+      </thead>
+      <tbody>
+        {% for doc in documents %}
+        <tr>
+          <td style="color:var(--text-muted)">#{{ doc['id'] }}</td>
+          <td><span class="badge badge-navy">{{ doc['doc_type'] }}</span></td>
+          <td style="font-weight:600;color:var(--navy)">{{ doc['customer_name'] or '—' }}</td>
+          <td>
+            {% if doc['vehicle_id'] %}
+              {% set v = vehicles | selectattr('id', 'equalto', doc['vehicle_id']) | first %}
+              {% if v %}{{ v['make'] }} {{ v['model'] }}{% else %}—{% endif %}
+            {% else %}—{% endif %}
+          </td>
+          <td>
+            <a href="{{ url_for('static', filename='images/uploads/' + doc['filename']) }}" target="_blank"
+               class="btn btn-sm btn-outline">
+              <i class="fas fa-eye"></i> View
+            </a>
+          </td>
+          <td style="font-size:12px;color:var(--text-secondary)">{{ doc['uploaded_at']|fmtdate('%d %b %Y') }}</td>
+          <td>
+            <button type="button" class="btn btn-sm btn-outline btn-icon"
+                    title="Edit this document"
+                    onclick="docEdit({{ doc['id'] }}, {{ (doc['doc_type'] or '')|tojson }}, {{ (doc['customer_name'] or '')|tojson }}, {{ doc['vehicle_id'] or 0 }})">
+              <i class="fas fa-pen"></i>
+            </button>
+            <form method="POST" action="{{ url_for('dealer.delete_document', docid=doc['id']) }}" id="del_doc_{{ doc['id'] }}">
+              <button type="button" onclick="confirmDelete('del_doc_{{ doc['id'] }}', 'Delete this document?')"
+                      class="btn btn-sm btn-danger btn-icon">
+                <i class="fas fa-trash"></i>
+              </button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="8">
+            <div class="empty-state"><i class="fas fa-folder-open"></i><h3>No documents uploaded yet</h3></div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{# ── Edit document ────────────────────────────────────────────────────────
+   Changes the type, owner or linked vehicle. The file itself is optional —
+   leave it empty to keep the existing one, or pick a new file to replace it.
+   Adding another document for the same car is just the upload form again;
+   nothing stops one vehicle having many. #}
+<div id="docEditBack" onclick="if(event.target===this)docEditClose()"
+     style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:3000;
+            align-items:center;justify-content:center;padding:16px">
+  <div class="card" style="max-width:480px;width:100%;margin:0" onclick="event.stopPropagation()">
+    <div class="card-header">
+      <div class="card-title"><i class="fas fa-pen" style="margin-right:8px;color:var(--gold-accent)"></i>Edit Document</div>
+      <button type="button" class="btn btn-sm btn-outline" onclick="docEditClose()">&times;</button>
+    </div>
+    <div class="card-body">
+      <form method="POST" id="docEditForm" enctype="multipart/form-data">
+        <div class="form-group mb-16">
+          <label>Related Vehicle</label>
+          <select name="vehicle_id" id="edVehicle" onchange="docFillOwner('ed')">
+            <option value="">Not vehicle-specific</option>
+            {% for v in vehicles %}
+            <option value="{{ v['id'] }}" data-owner="{{ v.get('seller_name') or '' }}">
+              {% if v.registration_number %}{{ v.registration_number }} — {% endif %}{{ v.year }} {{ v['make'] }} {{ v['model'] }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group mb-16">
+          <label>Customer / Owner Name</label>
+          <input type="text" name="customer_name" id="edOwner">
+          <small id="edOwnerHint" style="display:none;font-size:11px;color:var(--text-muted)">
+            Filled from the vehicle's recorded owner — edit if it should differ.
+          </small>
+        </div>
+        <div class="form-group mb-16">
+          <label>Document Type *</label>
+          <select name="doc_type" id="edType" required>
+            {% for t in ['RC (Registration Certificate)','Insurance','Aadhar Card','PAN Card','Driving License','NOC','Agreement','Other'] %}
+            <option value="{{ t }}">{{ t }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group mb-16">
+          <label>Replace File <span style="font-weight:400;color:var(--text-muted)">(optional)</span></label>
+          <input type="file" name="document" accept=".pdf,.jpg,.jpeg,.png" style="padding:8px">
+          <small style="font-size:11px;color:var(--text-muted)">Leave empty to keep the current file.</small>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button type="submit" class="btn btn-primary" style="flex:1">Save Changes</button>
+          <button type="button" class="btn btn-outline" onclick="docEditClose()">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+// Fill the owner name from the vehicle's recorded seller. Only overwrites an
+// empty box, or one this script filled itself — never something typed by hand.
+function docFillOwner(prefix) {
+  var sel   = document.getElementById(prefix === 'ed' ? 'edVehicle' : 'docVehicle');
+  var input = document.getElementById(prefix === 'ed' ? 'edOwner'   : 'docOwner');
+  var hint  = document.getElementById(prefix === 'ed' ? 'edOwnerHint' : 'docOwnerHint');
+  if (!sel || !input) return;
+
+  var owner = (sel.options[sel.selectedIndex] || {}).getAttribute
+            ? sel.options[sel.selectedIndex].getAttribute('data-owner') : '';
+  owner = owner || '';
+
+  var untouched = !input.value || input.dataset.auto === '1';
+  if (owner && untouched) {
+    input.value = owner;
+    input.dataset.auto = '1';
+    if (hint) hint.style.display = 'block';
+  } else if (!owner && input.dataset.auto === '1') {
+    input.value = '';
+    input.dataset.auto = '';
+    if (hint) hint.style.display = 'none';
+  }
+}
+['docOwner', 'edOwner'].forEach(function (id) {
+  var el = document.getElementById(id);
+  if (el) el.addEventListener('input', function () { this.dataset.auto = ''; });
+});
+
+function docEdit(id, type, customer, vehicleId) {
+  var form = document.getElementById('docEditForm');
+  form.action = '{{ url_for("dealer.edit_document", docid=0) }}'.replace(/\/0(\/|$)/, '/' + id + '$1');
+  document.getElementById('edType').value    = type || '';
+  document.getElementById('edOwner').value   = customer || '';
+  document.getElementById('edVehicle').value = vehicleId ? String(vehicleId) : '';
+  document.getElementById('edOwner').dataset.auto = '';
+  document.getElementById('edOwnerHint').style.display = 'none';
+  document.getElementById('docEditBack').style.display = 'flex';
+}
+function docEditClose() { document.getElementById('docEditBack').style.display = 'none'; }
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') docEditClose();
+});
+</script>
+{% endblock %}

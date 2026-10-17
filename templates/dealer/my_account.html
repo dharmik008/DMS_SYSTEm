@@ -1,0 +1,134 @@
+{% extends "dealer/base.html" %}
+{% block title %}My Account — Caryanams{% endblock %}
+{% block page_title %}My Account{% endblock %}
+
+{% block content %}
+<div style="max-width:680px;margin:0 auto">
+
+  <!-- Profile Card -->
+  <div class="card mb-24">
+    <div class="card-header">
+      <div class="card-title"><i class="fas fa-user-circle"></i> Profile Information</div>
+    </div>
+    <div class="card-body">
+      <!-- Avatar -->
+      <div style="display:flex;align-items:center;gap:20px;margin-bottom:28px;padding-bottom:20px;border-bottom:1px solid var(--card-border)">
+        <div style="width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,var(--navy),var(--primary,#1a73e8));display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:800;color:#fff;flex-shrink:0">
+          {{ current_user.get('name','D')[0].upper() }}
+        </div>
+        <div>
+          <div style="font-size:20px;font-weight:700;color:var(--navy)">{{ current_user.get('name','') }}</div>
+          <div style="font-size:13px;color:var(--text-muted);margin-top:2px">{{ current_user.get('email','') }}</div>
+          <div style="margin-top:6px">
+            <span style="background:#eff6ff;color:#1a73e8;font-size:12px;font-weight:600;padding:3px 10px;border-radius:20px">
+              <i class="fas fa-crown" style="font-size:10px"></i>
+              {{ current_user.get('subscription_plan','Starter')|title }} Plan
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Update Profile Form -->
+      <form method="POST" action="{{ url_for('dealer.my_account') }}">
+        <input type="hidden" name="action" value="update_profile">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+          <div>
+            <label style="font-size:13px;font-weight:600;color:var(--navy);display:block;margin-bottom:6px">Full Name</label>
+            <input type="text" name="name" value="{{ current_user.get('name','') }}" required
+              style="width:100%;padding:10px 14px;border:1.5px solid var(--card-border);border-radius:8px;font-size:14px;outline:none;transition:border-color .2s"
+              onfocus="this.style.borderColor='var(--primary,#1a73e8)'" onblur="this.style.borderColor='var(--card-border)'">
+          </div>
+          <div>
+            <label style="font-size:13px;font-weight:600;color:var(--navy);display:block;margin-bottom:6px">Login Mobile Number</label>
+            <input type="text" value="{{ login_phone_masked or 'Not set' }}" disabled
+              style="width:100%;padding:10px 14px;border:1.5px solid var(--card-border);border-radius:8px;font-size:14px;outline:none;background:#f8fafc;color:var(--text-muted);cursor:not-allowed">
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px"><a href="#login-number" style="color:var(--primary,#1a73e8);font-weight:600">Change it below</a></div>
+          </div>
+        </div>
+        <div style="margin-bottom:20px">
+          <label style="font-size:13px;font-weight:600;color:var(--navy);display:block;margin-bottom:6px">Email Address</label>
+          <input type="email" value="{{ current_user.get('email','') }}" disabled
+            style="width:100%;padding:10px 14px;border:1.5px solid var(--card-border);border-radius:8px;font-size:14px;background:#f8fafc;color:var(--text-muted);cursor:not-allowed">
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px"><i class="fas fa-lock" style="font-size:10px"></i> Email cannot be changed</div>
+        </div>
+        <button type="submit" class="btn btn-primary">
+          <i class="fas fa-save"></i> Save Changes
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <style>#phoneResend:disabled{color:var(--text-muted)!important;cursor:default!important;font-weight:500!important}</style>
+  <!-- Login Mobile Number Card -->
+  <div class="card mb-24" id="login-number">
+    <div class="card-header">
+      <div class="card-title"><i class="fas fa-mobile-alt"></i> Login Mobile Number</div>
+    </div>
+    <div class="card-body">
+      <p style="font-size:13px;color:var(--text-muted);margin:0 0 16px;line-height:1.55">
+        You sign in with this number and a 6-digit code we text to it. There is no password.
+        Current number: <strong style="color:var(--navy)">{{ login_phone_masked or 'not set' }}</strong>
+      </p>
+      {% if otp_test_mode %}
+      <div style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:9px 12px;font-size:12.5px;margin-bottom:14px">
+        <i class="fas fa-flask"></i> Test mode: no SMS is sent. The code is printed in the window where the app is running.
+      </div>
+      {% endif %}
+
+      {% if phone_pending_masked %}
+      <form method="POST" action="{{ url_for('dealer.my_account') }}#login-number" id="phoneVerifyForm" novalidate>
+        <input type="hidden" name="action" value="phone_verify">
+        <label for="phoneCode" style="font-size:13px;font-weight:600;color:var(--navy);display:block;margin-bottom:6px">
+          Enter the 6-digit code sent to {{ phone_pending_masked }}
+        </label>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <input id="phoneCode" name="code" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code"
+                 maxlength="6" placeholder="••••••" required autofocus
+                 style="width:100%;padding:10px 14px;border:1.5px solid var(--card-border);border-radius:8px;font-size:14px;outline:none;max-width:200px;font-size:20px;letter-spacing:.4em;text-align:center;font-weight:600">
+          <button type="submit" class="btn btn-primary"><i class="fas fa-check"></i> Verify &amp; change</button>
+        </div>
+      </form>
+      <div style="display:flex;gap:16px;margin-top:12px;font-size:13px">
+        <form method="POST" action="{{ url_for('dealer.my_account') }}#login-number">
+          <input type="hidden" name="action" value="phone_resend">
+          <button type="submit" id="phoneResend" data-wait="{{ phone_resend_wait }}" {% if phone_resend_wait %}disabled{% endif %}
+                  style="background:none;border:none;padding:0;cursor:pointer;color:var(--primary,#1a73e8);font-weight:600">
+            Resend code{% if phone_resend_wait %} in {{ phone_resend_wait }}s{% endif %}</button>
+        </form>
+        <form method="POST" action="{{ url_for('dealer.my_account') }}#login-number">
+          <input type="hidden" name="action" value="phone_cancel">
+          <button type="submit" style="background:none;border:none;padding:0;cursor:pointer;color:var(--text-muted)">Cancel</button>
+        </form>
+      </div>
+      {% else %}
+      <form method="POST" action="{{ url_for('dealer.my_account') }}#login-number" novalidate
+            onsubmit="var d=this.new_phone.value.replace(/\D/g,'');if(!/^[6-9]\d{9}$/.test(d)){alert('Please enter a valid 10-digit mobile number.');return false;}">
+        <input type="hidden" name="action" value="phone_send">
+        <label for="newPhone" style="font-size:13px;font-weight:600;color:var(--navy);display:block;margin-bottom:6px">New mobile number</label>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <input id="newPhone" name="new_phone" type="tel" inputmode="numeric" autocomplete="tel-national" maxlength="14"
+                 placeholder="10-digit mobile number" required style="width:100%;padding:10px 14px;border:1.5px solid var(--card-border);border-radius:8px;font-size:14px;outline:none;max-width:260px">
+          <button type="submit" class="btn btn-primary"><i class="fas fa-sms"></i> Send code</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:6px">We'll text a code to the new number. Your number only changes after you enter it.</div>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function(){
+  var code=document.getElementById('phoneCode');
+  if(code){ code.addEventListener('input',function(){ var v=code.value.replace(/\D/g,'').slice(0,6); code.value=v;
+    if(v.length===6) document.getElementById('phoneVerifyForm').submit(); }); }
+  var rs=document.getElementById('phoneResend');
+  if(rs){ var left=parseInt(rs.dataset.wait||'0',10);
+    if(left>0){ var t=setInterval(function(){ left--; if(left<=0){clearInterval(t);rs.disabled=false;rs.textContent='Resend code';}
+      else rs.textContent='Resend code in '+left+'s'; },1000); } }
+})();
+</script>
+{% endblock %}

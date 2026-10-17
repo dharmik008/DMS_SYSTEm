@@ -1,0 +1,162 @@
+{% extends "dealer/base.html" %}
+{% block title %}Deals — Caryanams{% endblock %}
+{% block page_title %}Deals & Sales{% endblock %}
+
+{% block content %}
+<!-- Status Tabs -->
+<div class="stage-tabs mb-16">
+  <a href="{{ url_for('dealer.deals') }}" class="stage-tab {% if not status_filter %}active{% endif %}">All <span class="count">{{ status_counts.values()|sum }}</span></a>
+  {% for s in statuses %}
+  <a href="{{ url_for('dealer.deals', status=s) }}" class="stage-tab {% if status_filter == s %}active{% endif %}">
+    {{ s.title() }} <span class="count">{{ status_counts[s] }}</span>
+  </a>
+  {% endfor %}
+</div>
+
+<div class="section-header mb-16">
+  <div></div>
+  <a href="{{ url_for('dealer.add_deal') }}" class="btn btn-primary"><i class="fas fa-plus"></i> New Deal</a>
+</div>
+
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>#</th><th>Customer</th><th>Vehicle</th><th>Final Price</th><th>Payment</th><th>GST</th><th>Total</th><th>Status</th><th>Actions</th></tr>
+      </thead>
+      <tbody>
+        {% for deal in deals %}
+        <tr>
+          <td style="color:var(--text-muted);font-size:12px">#{{ deal['id'] }}</td>
+          <td>
+            <div style="font-weight:600;color:var(--navy)">{{ deal['customer_name'] }}</div>
+            <div style="font-size:12px;color:var(--text-secondary)">{{ deal['customer_phone'] }}</div>
+          </td>
+          <td>
+            {% if deal.vehicle %}
+            <div style="font-size:13px;font-weight:600">{{ deal.vehicle.make }} {{ deal.vehicle.model }}</div>
+            <div style="font-size:11px;color:var(--text-secondary)">{{ deal.vehicle.year }}</div>
+            {% endif %}
+          </td>
+          <td style="font-weight:700;color:var(--navy)">₹{{ "{:,.0f}".format(deal['final_price']) }}</td>
+          <td><span class="badge badge-navy">{{ deal['payment_mode'].title() }}</span></td>
+          <td style="color:var(--text-secondary)">₹{{ "{:,.0f}".format(deal['gst_amount']) }}</td>
+          <td style="font-weight:700;color:var(--success)">₹{{ "{:,.0f}".format(deal['total_amount'] or deal['final_price']) }}</td>
+          <td>
+            <span class="badge {% if deal['status'] == 'delivered' %}badge-success{% elif deal['status'] == 'cancelled' %}badge-danger{% elif deal['status'] == 'booked' %}badge-info{% else %}badge-warning{% endif %}">
+              {{ deal['status'] }}
+            </span>
+          </td>
+          <td>
+            <div style="display:flex;gap:6px">
+              <a href="{{ url_for('dealer.edit_deal', did_=deal['id']) }}" class="btn btn-sm btn-primary">Edit</a>
+              <a href="{{ url_for('dealer.invoice', did_=deal['id']) }}" class="btn btn-sm btn-outline" target="_blank"><i class="fas fa-file-invoice"></i></a>
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9"><div class="empty-state"><i class="fas fa-handshake"></i><h3>No deals found</h3><a href="{{ url_for('dealer.add_deal') }}" class="btn btn-primary mt-16">Create First Deal</a></div></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{# ── Purchase → Sale trail ──────────────────────────────────────────────────
+   The full story of each car: who the dealer bought it from (Vehicle.seller_*,
+   captured on the Add Vehicle form) and who they later sold it to (the deal).
+   Everything here already rides along in `deal['vehicle']`, so there is no
+   extra query. #}
+<div class="card mt-24">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-exchange-alt" style="margin-right:8px;color:var(--gold-accent)"></i>
+      Purchase &rarr; Sale Trail
+    </div>
+    <span style="font-size:12px;color:var(--text-secondary)">Bought from &middot; sold to &middot; profit</span>
+  </div>
+  <div class="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th>Vehicle</th>
+          <th>Bought From</th>
+          <th class="r">Bought For</th>
+          <th>Sold To</th>
+          <th class="r">Sold For</th>
+          <th class="r">Held</th>
+          <th class="r">Profit</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% set ns = namespace(rows=0) %}
+        {% for deal in deals %}
+          {% set v = deal['vehicle'] %}
+          {% if v %}
+          {% set ns.rows = ns.rows + 1 %}
+          {% set bought = v.get('purchase_price') or 0 %}
+          {% set sold = deal['final_price'] or 0 %}
+          <tr>
+            <td>
+              <div style="font-weight:600">{{ v['year'] }} {{ v['make'] }} {{ v['model'] }}</div>
+              {% if v.get('registration_number') %}
+              <div style="font-size:11px;color:var(--text-secondary)">{{ v['registration_number'] }}</div>
+              {% endif %}
+            </td>
+
+            <td>
+              {% if v.get('seller_name') %}
+                <div style="font-weight:600">{{ v['seller_name'] }}</div>
+                <div style="font-size:11px;color:var(--text-secondary)">
+                  {{ v.get('seller_phone') or '' }}{% if v.get('seller_city') %} &middot; {{ v['seller_city'] }}{% endif %}
+                </div>
+              {% else %}
+                <span style="color:var(--text-muted);font-size:12px">Not recorded</span>
+              {% endif %}
+            </td>
+            <td class="r">
+              {% if bought %}&#8377;{{ "{:,.0f}".format(bought) }}
+              {% else %}<span style="color:var(--text-muted)">&mdash;</span>{% endif %}
+            </td>
+
+            <td>
+              <div style="font-weight:600">{{ deal['customer_name'] }}</div>
+              <div style="font-size:11px;color:var(--text-secondary)">
+                {{ deal.get('customer_phone') or '' }} &middot; {{ deal['status'] }}
+              </div>
+            </td>
+            <td class="r" style="font-weight:600">&#8377;{{ "{:,.0f}".format(sold) }}</td>
+
+            <td class="r" style="color:var(--text-secondary)">
+              {% if v.get('created_at') and deal.get('created_at') %}
+                {{ (deal['created_at'] - v['created_at']).days }}d
+              {% else %}&mdash;{% endif %}
+            </td>
+
+            <td class="r">
+              {% if bought %}
+                {% set profit = sold - bought %}
+                <span style="font-weight:700;color:{% if profit >= 0 %}var(--success){% else %}var(--danger){% endif %}">
+                  {% if profit < 0 %}-{% endif %}&#8377;{{ "{:,.0f}".format(profit|abs) }}
+                </span>
+              {% else %}
+                <span style="color:var(--text-muted)">&mdash;</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endif %}
+        {% endfor %}
+        {% if ns.rows == 0 %}
+        <tr><td colspan="7">
+          <div class="empty-state">
+            <i class="fas fa-exchange-alt"></i>
+            <h3>Nothing to trace yet</h3>
+            <p>Once a deal is linked to a vehicle, its purchase and sale appear here.</p>
+          </div>
+        </td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

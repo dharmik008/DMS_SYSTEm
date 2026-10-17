@@ -1,0 +1,330 @@
+{% extends "dealer/base.html" %}
+{% block title %}{{ 'Edit' if deal else 'New' }} Deal — Caryanams{% endblock %}
+{% block page_title %}{{ 'Edit' if deal else 'New' }} Deal{% endblock %}
+
+{% block content %}
+<div style="max-width:900px">
+  <form method="POST" id="dealForm" onsubmit="return validateDealForm()">
+    <div class="grid-2 mb-24">
+      <!-- Left: Deal Details -->
+      <div style="display:flex;flex-direction:column;gap:24px">
+        <div class="card">
+          <div class="card-header"><div class="card-title"><i class="fas fa-car" style="margin-right:8px;color:var(--gold-accent)"></i>Vehicle & Pricing</div></div>
+          <div class="card-body">
+            <div class="form-grid">
+              <div class="form-group full">
+                <label>Vehicle *</label>
+                <select name="vehicle_id" id="vehicle_select" required onchange="onVehicleChange(this)">
+                  <option value="">Select Vehicle</option>
+                  {% for v in vehicles %}
+                  <option value="{{ v['id'] }}"
+                    data-price="{{ v['price'] }}"
+                    data-year="{{ v.get('year','') }}"
+                    data-make="{{ v.get('make','') }}"
+                    data-model="{{ v.get('model','') }}"
+                    data-fuel="{{ v.get('fuel_type','') }}"
+                    data-transmission="{{ v.get('transmission','') }}"
+                    data-mileage="{{ v.get('mileage','') }}"
+                    data-color="{{ v.get('color','') }}"
+                    {% if deal and deal['vehicle_id'] == v['id'] %}selected{% endif %}>
+                    {{ v['year'] }} {{ v['make'] }} {{ v['model'] }} — ₹{{ "{:,.0f}".format(v['price']) }}
+                  </option>
+                  {% endfor %}
+                </select>
+              </div>
+              <!-- Vehicle info auto-fetch panel -->
+              <div id="vehicleInfoPanel" style="display:none;margin-top:10px;padding:12px 14px;background:var(--gold);border-radius:var(--radius);border:1px solid var(--gold-dark);grid-column:1/-1">
+                <div style="font-size:11px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px"><i class="fas fa-car" style="margin-right:6px;color:var(--gold-accent)"></i>Selected Vehicle Info</div>
+                <div id="vehicleInfoGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:6px"></div>
+              </div>
+              </div>
+              <div class="form-group">
+                <label>Asking Price (₹)</label>
+                <input type="number" name="asking_price" id="asking_price" value="{{ deal['asking_price'] if deal and deal['asking_price'] else '' }}" placeholder="Original asking price">
+              </div>
+              <div class="form-group">
+                <label>Final Price (₹) *</label>
+                <input type="number" name="final_price" id="final_price" value="{{ deal['final_price'] if deal else '' }}" required>
+              </div>
+              <div class="form-group">
+                <label>Booking Amount (₹)</label>
+                <input type="number" name="booking_amount" value="{{ deal['booking_amount'] if deal and deal['booking_amount'] else '' }}">
+              </div>
+              <div class="form-group">
+                <label>Status</label>
+                <select name="status">
+                  {% for s in ['negotiation','booked','finalized','delivered','cancelled'] %}
+                  <option value="{{ s }}" {% if deal and deal['status'] == s %}selected{% endif %}>{{ s.title() }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><div class="card-title"><i class="fas fa-user" style="margin-right:8px;color:var(--gold-accent)"></i>Customer Info</div></div>
+          <div class="card-body">
+            <div class="form-grid">
+
+              {# Populated when a vehicle is chosen above: anyone who already
+                 raised a lead or an inquiry for that car. Tap to fill. #}
+              <div class="form-group full" id="vcWrap" style="display:none">
+                <label id="vcLabel">Already interested in this vehicle</label>
+                <div id="vcList" style="display:flex;flex-direction:column;gap:6px"></div>
+                <div id="vcEmpty" style="display:none;font-size:12px;color:var(--text-muted);
+                     padding:8px 10px;background:var(--bg);border-radius:8px">
+                  No leads or enquiries yet for this vehicle.
+                </div>
+              </div>
+
+              <div class="form-group full">
+                <label>Customer Name *</label>
+                <input type="text" name="customer_name" value="{{ deal['customer_name'] if deal else '' }}" required>
+              </div>
+              <div class="form-group">
+                <label>Phone</label>
+                <input type="tel" name="customer_phone" id="deal_customer_phone"
+                value="{{ deal['customer_phone'] if deal else '' }}"
+                placeholder="+91XXXXXXXXXX or 10-digit number"
+                maxlength="14"
+                oninput="formatPhoneInput(this)">
+              <small style="font-size:11px;color:var(--text-muted)">10-digit number or +91 + 10 digits</small>
+              <div id="deal_phone_error" style="color:#e53e3e;font-size:11px;display:none;margin-top:3px;"></div>
+              </div>
+              <div class="form-group">
+                <label>Email</label>
+                <input type="email" name="customer_email" value="{{ deal['customer_email'] if deal else '' }}">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><div class="card-title"><i class="fas fa-sticky-note" style="margin-right:8px;color:var(--gold-accent)"></i>Notes</div></div>
+          <div class="card-body">
+            <div class="form-group">
+              <textarea name="notes" placeholder="Deal notes, special conditions...">{{ deal['notes'] if deal else '' }}</textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Payment & EMI -->
+      <div style="display:flex;flex-direction:column;gap:24px">
+        <!-- EMI Calculator -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title"><i class="fas fa-calculator" style="margin-right:8px;color:var(--gold-accent)"></i>EMI Calculator</div>
+            <span style="font-size:12px;color:var(--text-muted)">Helper Tool</span>
+          </div>
+          <div class="card-body">
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Loan Amount (₹)</label>
+                <input type="number" id="emi_principal" placeholder="e.g. 800000" oninput="calculateEMI()">
+              </div>
+              <div class="form-group">
+                <label>Interest Rate (% p.a.)</label>
+                <input type="number" id="emi_rate" placeholder="e.g. 9.5" step="0.1" oninput="calculateEMI()">
+              </div>
+              <div class="form-group full">
+                <label>Tenure (Months)</label>
+                <input type="number" id="emi_months" placeholder="e.g. 60" oninput="calculateEMI()">
+              </div>
+            </div>
+            <div id="emi_result" class="emi-result">
+              <p class="text-muted" style="font-size:13px">Enter values above to calculate EMI</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:12px">
+      <button type="submit" class="btn btn-primary btn-lg"><i class="fas fa-save"></i> Save Deal</button>
+      <a href="{{ url_for('dealer.deals') }}" class="btn btn-outline btn-lg"><i class="fas fa-times"></i> Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Init
+// Auto-fetch vehicle info on page load (edit mode)
+document.addEventListener('DOMContentLoaded', function() {
+  var sel = document.getElementById('vehicle_select');
+  if (sel && sel.value) onVehicleChange(sel);
+});
+
+// ── Phone formatting ──────────────────────────────────────────────────────────
+function formatPhoneInput(input) {
+  var val = input.value.replace(/[^+0-9]/g, '');
+  if (val.startsWith('+') && !val.startsWith('+91')) {
+    val = '+91' + val.replace(/^\+[0-9]*/g, '');
+  }
+  input.value = val;
+}
+
+// ── Validate phone: +91 + 10 digits OR exactly 10 digits ─────────────────────
+function validatePhone(value) {
+  var clean = (value || '').trim();
+  if (!clean) return true; // phone is optional in deal form
+  return /^\+91[0-9]{10}$/.test(clean) || /^[0-9]{10}$/.test(clean);
+}
+
+// ── Deal & Seal form validation ───────────────────────────────────────────────
+function validateDealForm() {
+  var phoneInput = document.getElementById('deal_customer_phone');
+  var phoneErr   = document.getElementById('deal_phone_error');
+  var finalPrice = document.getElementById('final_price');
+  var valid = true;
+
+  // Phone validation
+  if (phoneInput && phoneInput.value.trim() !== '') {
+    if (!validatePhone(phoneInput.value)) {
+      if (phoneErr) {
+        phoneErr.textContent = 'Enter a valid 10-digit number or +91 followed by 10 digits';
+        phoneErr.style.display = 'block';
+      }
+      phoneInput.style.borderColor = '#e53e3e';
+      phoneInput.focus();
+      valid = false;
+    } else {
+      if (phoneErr) phoneErr.style.display = 'none';
+      phoneInput.style.borderColor = '';
+    }
+  }
+
+  // Final price must be positive
+  if (finalPrice && (!finalPrice.value || parseFloat(finalPrice.value) <= 0)) {
+    finalPrice.style.borderColor = '#e53e3e';
+    finalPrice.focus();
+    alert('Please enter a valid Final Price.');
+    valid = false;
+  } else if (finalPrice) {
+    finalPrice.style.borderColor = '';
+  }
+
+  return valid;
+}
+
+// ── Vehicle auto-fetch ────────────────────────────────────────────────────────
+function onVehicleChange(sel) {
+  var opt = sel.options[sel.selectedIndex];
+  var panel = document.getElementById('vehicleInfoPanel');
+  var grid  = document.getElementById('vehicleInfoGrid');
+  var askingInput = document.getElementById('asking_price');
+  if (!opt || !opt.value) { panel.style.display = 'none'; return; }
+  var price = parseFloat(opt.dataset.price || 0);
+  if (price > 0 && askingInput) askingInput.value = Math.round(price);
+  var cells = [];
+  if (opt.dataset.year)         cells.push(['Year', opt.dataset.year]);
+  if (opt.dataset.make)         cells.push(['Make', opt.dataset.make]);
+  if (opt.dataset.model)        cells.push(['Model', opt.dataset.model]);
+  if (price > 0)                cells.push(['Price', '₹' + price.toLocaleString('en-IN')]);
+  if (opt.dataset.fuel)         cells.push(['Fuel', opt.dataset.fuel]);
+  if (opt.dataset.transmission) cells.push(['Gear', opt.dataset.transmission]);
+  if (opt.dataset.mileage)      cells.push(['KM', parseInt(opt.dataset.mileage).toLocaleString('en-IN')]);
+  if (opt.dataset.color)        cells.push(['Color', opt.dataset.color]);
+  grid.innerHTML = cells.map(function(c) {
+    return '<div style="background:#fff;border-radius:6px;padding:6px 8px"><div style="font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase">' + c[0] + '</div><div style="font-size:12px;font-weight:600;color:var(--navy)">' + c[1] + '</div></div>';
+  }).join('');
+  panel.style.display = cells.length ? 'block' : 'none';
+  loadVehicleContacts(opt.value);
+}
+
+// ── Customer Info: who already asked about this vehicle ──────────────────────
+var VC_URL = "{{ url_for('dealer.vehicle_contacts_api', vehicle_id=0) }}";
+
+function vcEsc(v) {
+  return String(v == null ? '' : v).replace(/[&<>"]/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+  });
+}
+
+function loadVehicleContacts(vehicleId) {
+  var wrap = document.getElementById('vcWrap');
+  if (!wrap) return;
+  if (!vehicleId) { wrap.style.display = 'none'; return; }
+
+  fetch(VC_URL.replace('/0/contacts', '/' + vehicleId + '/contacts'), {
+    credentials: 'same-origin', headers: { 'Accept': 'application/json' }
+  })
+    .then(function (r) { return r.ok ? r.json() : { contacts: [] }; })
+    .then(function (d) { renderVehicleContacts(d.contacts || []); })
+    .catch(function () { wrap.style.display = 'none'; });
+}
+
+function renderVehicleContacts(contacts) {
+  var wrap  = document.getElementById('vcWrap');
+  var list  = document.getElementById('vcList');
+  var empty = document.getElementById('vcEmpty');
+  var label = document.getElementById('vcLabel');
+
+  wrap.style.display = 'block';
+  list.innerHTML = '';
+
+  if (!contacts.length) {
+    empty.style.display = 'block';
+    label.textContent = 'Already interested in this vehicle';
+    return;
+  }
+  empty.style.display = 'none';
+  label.textContent = contacts.length === 1
+    ? '1 person already asked about this vehicle — tap to fill'
+    : contacts.length + ' people already asked about this vehicle — tap to fill';
+
+  contacts.forEach(function (c, i) {
+    var row = document.createElement('button');
+    row.type = 'button';               // never submits the deal form
+    row.className = 'vc-row';
+    row.setAttribute('data-i', i);
+    row.style.cssText =
+      'display:flex;align-items:center;gap:10px;width:100%;text-align:left;' +
+      'padding:8px 10px;border:1px solid var(--border);border-radius:8px;' +
+      'background:#fff;cursor:pointer;font:inherit';
+
+    var initial = (c.name || '?').trim().charAt(0).toUpperCase();
+    row.innerHTML =
+      '<span style="flex:none;width:28px;height:28px;border-radius:50%;' +
+        'background:var(--gold-accent);color:var(--navy);font-size:12px;font-weight:700;' +
+        'display:flex;align-items:center;justify-content:center">' + vcEsc(initial) + '</span>' +
+      '<span style="min-width:0;flex:1">' +
+        '<span style="display:block;font-size:13px;font-weight:600;color:var(--navy);' +
+          'overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + vcEsc(c.name) + '</span>' +
+        '<span style="display:block;font-size:11px;color:var(--text-secondary)">' +
+          vcEsc(c.phone) + (c.city ? ' · ' + vcEsc(c.city) : '') + '</span>' +
+      '</span>' +
+      '<span style="flex:none;font-size:10px;font-weight:700;text-transform:uppercase;' +
+        'color:var(--text-secondary);background:var(--bg);padding:3px 7px;border-radius:5px">' +
+        vcEsc(c.source_label) + '</span>';
+
+    row.title = (c.note ? c.note + ' — ' : '') + (c.when || '');
+    row.onclick = function () { applyVehicleContact(c, row); };
+    list.appendChild(row);
+  });
+}
+
+function applyVehicleContact(c, row) {
+  var nameEl  = document.querySelector('[name="customer_name"]');
+  var phoneEl = document.getElementById('deal_customer_phone');
+  var mailEl  = document.querySelector('[name="customer_email"]');
+
+  if (nameEl)  nameEl.value  = c.name  || '';
+  if (phoneEl) phoneEl.value = c.phone || '';
+  if (mailEl)  mailEl.value  = c.email || '';
+
+  // keep the existing phone formatter in charge of the phone field
+  if (phoneEl && typeof formatPhoneInput === 'function') formatPhoneInput(phoneEl);
+
+  Array.prototype.forEach.call(document.querySelectorAll('.vc-row'), function (r) {
+    r.style.borderColor = 'var(--border)';
+    r.style.background = '#fff';
+  });
+  row.style.borderColor = 'var(--gold-accent)';
+  row.style.background = 'var(--bg)';
+}
+</script>
+{% endblock %}

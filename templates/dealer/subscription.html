@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Subscription — Caryanams</title>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Montserrat:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+<style>
+  :root {
+    --navy-dark: #072654;
+    --navy: #0f3d7a;
+    --gold-accent: #d4a017;
+    --success: #16a34a;
+    --text-muted: #64748b;
+    --card-border: #e2e8f0;
+    --bg: #f1f5f9;
+    --card-bg: #ffffff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', sans-serif; background: var(--bg); color: #0f172a; min-height: 100vh; }
+
+  /* ── Layout ── */
+  .page-header {
+    background: linear-gradient(135deg, var(--navy-dark), var(--navy));
+    padding: 18px 32px;
+    display: flex; align-items: center; gap: 16px;
+  }
+  .back-btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: rgba(255,255,255,0.12); color: #fff;
+    border: 1px solid rgba(255,255,255,0.25);
+    padding: 9px 16px; border-radius: 10px;
+    font-family: 'Montserrat', sans-serif; font-size: 13px; font-weight: 700;
+    text-decoration: none; cursor: pointer; transition: background .2s;
+  }
+  .back-btn:hover { background: rgba(255,255,255,0.22); }
+  .page-header .logo {font-family: 'Montserrat', sans-serif;font-size: 22px;font-weight: 800;color: white;letter-spacing: 0;}
+  .page-header .logo span { color: var(--gold-accent); }
+  .page-title { font-family: 'Montserrat', sans-serif; font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.6); margin-left: auto; text-transform: uppercase; letter-spacing: 2px; }
+
+  .container { max-width: 1100px; margin: 0 auto; padding: 32px 24px; }
+
+  /* ── Cards ── */
+  .card { background: var(--card-bg); border-radius: 16px; border: 1px solid var(--card-border); box-shadow: 0 2px 8px rgba(0,0,0,.05); }
+  .card-body { padding: 24px; }
+  .card-header { padding: 18px 24px; border-bottom: 1px solid var(--card-border); display: flex; align-items: center; gap: 10px; }
+  .card-title { font-family: 'Montserrat', sans-serif; font-size: 15px; font-weight: 700; color: var(--navy-dark); display: flex; align-items: center; gap: 8px; }
+  .mb-24 { margin-bottom: 24px; }
+
+  /* ── Current Plan Banner ── */
+  .current-plan-banner {
+    background: linear-gradient(135deg, var(--navy-dark), var(--navy));
+    color: white;
+    border-radius: 16px;
+    padding: 28px 32px;
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;
+    margin-bottom: 24px;
+  }
+  .current-plan-label { font-family: 'Montserrat', sans-serif; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; opacity: 0.7; }
+  .current-plan-name { font-family: 'Oswald', sans-serif; font-size: 36px; font-weight: 700; margin-top: 4px; }
+  .current-plan-expiry { font-size: 13px; opacity: 0.7; margin-top: 4px; }
+  .badge-success { background: #16a34a; color: white; padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+  .badge-pending { background: #f59e0b; color: white; padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+  .badge-info { font-size: 11px; opacity: 0.6; margin-top: 8px; text-align: right; }
+
+  /* ── Plans Grid ── */
+  .plans-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; margin-bottom: 32px; }
+
+  .plan-card {
+    background: var(--card-bg); border-radius: 16px; border: 1px solid var(--card-border);
+    box-shadow: 0 2px 8px rgba(0,0,0,.05);
+    position: relative;
+    transition: transform .2s, box-shadow .2s;
+  }
+  .plan-card:hover { transform: translateY(-4px); box-shadow: 0 12px 32px rgba(0,0,0,.12); }
+  .plan-card.recommended { border: 2px solid var(--gold-accent); }
+  .plan-card.is-current { border: 2px solid var(--success); }
+
+  .recommended-badge {
+    position: absolute; top: -13px; left: 50%; transform: translateX(-50%);
+    background: var(--gold-accent); color: white;
+    padding: 4px 18px; border-radius: 20px; font-size: 11px; font-weight: 700;
+    white-space: nowrap; z-index: 1; display: flex; align-items: center; gap: 5px;
+  }
+
+  .plan-body { text-align: center; padding: 32px 24px; }
+  .plan-name { font-family: 'Montserrat', sans-serif; font-size: 20px; font-weight: 800; color: var(--navy-dark); }
+  .plan-price-wrap { margin: 20px 0; }
+  .plan-price { font-family: 'Oswald', sans-serif; font-size: 44px; font-weight: 800; color: var(--navy-dark); }
+  .plan-period { font-size: 13px; color: var(--text-muted); }
+
+  .plan-features { list-style: none; text-align: left; margin: 20px 0; padding: 0; }
+  .plan-features li { padding: 8px 0; display: flex; align-items: flex-start; gap: 10px; border-bottom: 1px solid var(--card-border); font-size: 14px; }
+  .plan-features li:last-child { border-bottom: none; }
+  .plan-features li i { color: var(--success); font-size: 13px; flex-shrink: 0; margin-top: 2px; }
+
+  /* ── Buttons ── */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 24px; border-radius: 10px; font-size: 14px; font-weight: 700; border: none; cursor: pointer; transition: all .2s; text-decoration: none; font-family: 'Montserrat', sans-serif; }
+  .btn-primary { background: var(--navy-dark); color: white; }
+  .btn-primary:hover { background: var(--navy); transform: translateY(-1px); }
+  .btn-success { background: #16a34a; color: white; }
+  .btn-success:hover { background: #15803d; }
+  .btn-outline { background: transparent; color: var(--navy-dark); border: 2px solid var(--navy-dark); }
+  .btn-outline:hover { background: var(--navy-dark); color: white; }
+  .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+  .btn-full { width: 100%; }
+
+  /* ── Security Footer ── */
+  .security-footer { text-align: center; padding: 20px; color: var(--text-muted); font-size: 13px; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; }
+  .security-footer i { color: #10b981; }
+
+  /* ── Demo Mode Notice ── */
+  .demo-notice { display:flex; align-items:flex-start; gap:10px; }
+
+  /* ── Confirmation Modal ── */
+  #confirmModal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 9998; align-items: center; justify-content: center; padding: 16px; }
+  .modal-box { background: #fff; border-radius: 20px; max-width: 460px; width: 100%; max-height: 92vh; overflow-y: auto; box-shadow: 0 24px 80px rgba(0,0,0,.3); }
+  .modal-header { background: linear-gradient(135deg, var(--navy-dark), var(--navy)); color: white; padding: 24px 28px; border-radius: 20px 20px 0 0; display: flex; align-items: center; justify-content: space-between; }
+  .modal-close { background: rgba(255,255,255,.15); border: none; color: white; width: 36px; height: 36px; border-radius: 50%; cursor: pointer; font-size: 20px; display: flex; align-items: center; justify-content: center; transition: background .2s; }
+  .modal-close:hover { background: rgba(255,255,255,.3); }
+  .modal-body { padding: 28px; }
+
+  .amount-badge { text-align: center; margin-bottom: 22px; }
+  .amount-badge-inner { display: inline-block; background: #f0f9ff; border: 2px solid #0ea5e9; border-radius: 14px; padding: 12px 28px; }
+  .amount-label { font-size: 12px; color: #0369a1; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+  .amount-value { font-family: 'Oswald', sans-serif; font-size: 36px; font-weight: 800; color: #0c4a6e; }
+  .amount-plan { font-size: 13px; color: #0369a1; }
+
+  .modal-features { list-style:none; margin:0 0 22px; padding:0; max-height: 220px; overflow-y:auto; }
+  .modal-features li { padding:7px 0; display:flex; align-items:flex-start; gap:9px; font-size:13.5px; color:#334155; border-bottom:1px solid #f1f5f9; }
+  .modal-features li:last-child { border-bottom: none; }
+  .modal-features li i { color: var(--success); font-size:12px; margin-top:3px; }
+
+  .demo-info-box { background:#fffbeb; border:1.5px solid #fcd34d; border-radius:12px; padding:14px 16px; font-size:12.5px; color:#92400e; margin-bottom:20px; display:flex; gap:10px; align-items:flex-start; }
+
+  .modal-actions { display:flex; flex-direction:column; gap:10px; }
+
+  /* ── Toast ── */
+  #toastContainer { position: fixed; top: 20px; right: 20px; z-index: 10001; display:flex; flex-direction:column; gap:10px; max-width: calc(100vw - 40px); }
+  .toast { min-width:280px; max-width:360px; background:#fff; border-radius:12px; box-shadow:0 12px 32px rgba(0,0,0,.18); padding:14px 18px; display:flex; align-items:flex-start; gap:10px; font-size:13.5px; animation: toastIn .25s ease; border-left:4px solid var(--success); }
+  .toast.error { border-left-color:#ef4444; }
+  .toast i { font-size:18px; margin-top:1px; }
+  .toast.success i { color: var(--success); }
+  .toast.error i { color:#ef4444; }
+  @keyframes toastIn { from { opacity:0; transform: translateX(30px); } to { opacity:1; transform: translateX(0); } }
+
+  /* ── Spinner ── */
+  .spin { animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Last Payment mini card ── */
+  .last-payment { font-size:12.5px; color:#64748b; display:flex; flex-wrap:wrap; gap:14px; padding:14px 0 0; border-top:1px dashed var(--card-border); margin-top:14px; }
+  .last-payment b { color:#0f172a; }
+
+  @media (max-width: 640px) {
+    .current-plan-banner { flex-direction: column; align-items: flex-start; }
+    .plans-grid { grid-template-columns: 1fr; }
+    .container { padding: 20px 16px; }
+    .page-header { padding: 14px 16px; flex-wrap: wrap; }
+    .page-title { display:none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="page-header">
+  {# v29-header-btn: during onboarding the dashboard is locked, so offer Sign Out instead of a link that bounces straight back here. #}
+  <a href="{{ url_for('dealer.dashboard') if has_active_plan else url_for('auth.logout', **{'as': 'dealer'}) }}" id="backToDmsBtn" class="back-btn">
+    {% if has_active_plan %}<i class="fas fa-arrow-left"></i> Back to DMS
+    {% else %}<i class="fas fa-sign-out-alt"></i> Sign Out{% endif %}
+  </a>
+  <!-- Header -->
+<!-- Header -->
+<div class="page-header">
+  <div class="logo">Caryanams</span></div>
+  <div class="page-title">Subscription Plans</div>
+</div>
+</div>
+</div>
+
+<div class="container">
+
+  {# v29-onboarding-notice #}
+  {% if not has_active_plan %}
+  <div class="card mb-24" style="border:2px solid #0f3d7a;background:#eef4ff">
+    <div class="card-body" style="padding:18px 22px;display:flex;gap:12px;align-items:flex-start">
+      <i class="fas fa-hand-point-down" style="color:#0f3d7a;font-size:18px;margin-top:2px"></i>
+      <div>
+        <strong style="color:#072654;font-size:14px;display:block;margin-bottom:6px">
+          {% if sub_state and sub_state.ever_subscribed %}Your subscription has ended{% else %}One last step — choose your plan{% endif %}
+        </strong>
+        <p style="color:#1e3a8a;font-size:13px;margin:0">
+          Your Caryanams DMS dashboard unlocks the moment a plan is activated.
+          {% if sub_state and sub_state.ever_subscribed %}Renew below to pick up exactly where you left off.{% endif %}
+        </p>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Current Plan Banner -->
+  <div class="current-plan-banner mb-24">
+    <div>
+      <div class="current-plan-label">Current Plan</div>
+      {# v29-banner: rendered from the database, not from localStorage #}
+      <div class="current-plan-name" id="bannerPlanName">{% if has_active_plan %}{{ (current_plan_key or 'starter') | title }}{% else %}No active plan{% endif %}</div>
+      <div class="current-plan-expiry" id="bannerExpiry">{% if has_active_plan %}{% if sub_state and sub_state.expires_at %}Valid until {{ sub_state.expires_at.strftime('%d %b %Y') }}{% else %}Active{% endif %}{% else %}Choose a plan below to unlock your dashboard{% endif %}</div>
+    </div>
+    <div style="text-align:right">
+      {# v29-status-badge #}
+      <span class="{{ 'badge-success' if has_active_plan else 'badge-pending' }}" id="bannerStatus">{% if has_active_plan %}<i class="fas fa-check-circle"></i> Active{% else %}<i class="fas fa-clock"></i> Not Active{% endif %}</span>
+      <div class="badge-info"><i class="fas fa-flask"></i> Demo Payment Mode</div>
+    </div>
+  </div>
+
+  <!-- Demo Mode Notice -->
+  <div class="card mb-24" style="border:2px solid #f59e0b;background:#fffbeb">
+    <div class="card-body demo-notice" style="padding:18px 22px">
+      <i class="fas fa-info-circle" style="color:#d97706;font-size:18px;margin-top:2px"></i>
+      <div>
+        <strong style="color:#92400e;font-size:14px;display:block;margin-bottom:6px">Demo Payment Mode — Testing Only</strong>
+        <p style="color:#78350f;font-size:13px;margin:0">
+          Razorpay is not connected yet. Activating Growth or Pro right now uses a <strong>demo payment</strong> — no real money is charged. Real online checkout will be enabled later by simply turning Razorpay on.
+        </p>
+        <div class="last-payment" id="lastPaymentBox" style="display:none">
+          <span>Last Txn: <b id="lpTxn">—</b></span>
+          <span>Method: <b id="lpMethod">—</b></span>
+          <span>Amount: <b id="lpAmount">—</b></span>
+          <span>Status: <b id="lpStatus">—</b></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Plans Grid -->
+  <div class="plans-grid">
+
+    <!-- Starter -->
+    <div class="plan-card" id="cardStarter">
+      <div class="plan-body">
+        <div class="plan-name">Starter</div>
+        <div class="plan-price-wrap">
+          <span class="plan-price">Free</span>
+        </div>
+        <ul class="plan-features">
+          <li><i class="fas fa-check-circle"></i>Dealer Dashboard</li>
+          <li><i class="fas fa-check-circle"></i>Inventory Management — 10 Cars</li>
+          <li><i class="fas fa-check-circle"></i>Car Listings</li>
+          <li><i class="fas fa-check-circle"></i>Lead Management — Basic</li>
+          <li><i class="fas fa-check-circle"></i>CRM — Basic</li>
+          <li><i class="fas fa-check-circle"></i>1 Staff / Agent</li>
+          <li><i class="fas fa-check-circle"></i>Deals &amp; Sales — Basic</li>
+          <li><i class="fas fa-check-circle"></i>Document Management — Basic</li>
+          <li><i class="fas fa-check-circle"></i>Reports &amp; Analytics — Basic</li>
+          <li><i class="fas fa-check-circle"></i>Caryanams Marketing</li>
+          <li><i class="fas fa-check-circle"></i>Car Studio — 5/month</li>
+          <li><i class="fas fa-check-circle"></i>Dealer Website — Basic</li>
+          <li><i class="fas fa-check-circle"></i>Challan / RTO / History Check — 2/month each</li>
+        </ul>
+        {# v29-starter-btn: the free plan is a real choice, not a dead button #}
+        {% if has_active_plan and current_plan_key == 'starter' %}
+        <button class="btn btn-success btn-full" id="btnStarter" disabled>
+          <i class="fas fa-check"></i> Current Plan
+        </button>
+        {% else %}
+        <button class="btn btn-primary btn-full" id="btnStarter" onclick="activateFreePlan()">
+          <i class="fas fa-arrow-right"></i> Continue Free — Go to Dashboard
+        </button>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Growth -->
+    <div class="plan-card recommended" id="cardGrowth">
+      <div class="recommended-badge"><i class="fas fa-star"></i> RECOMMENDED</div>
+      <div class="plan-body">
+        <div class="plan-name">Growth (Studio)</div>
+        <div class="plan-price-wrap">
+          <span class="plan-price">₹999</span>
+          <span class="plan-period">/month</span>
+        </div>
+        <ul class="plan-features">
+          <li><i class="fas fa-check-circle"></i>Dealer Dashboard</li>
+          <li><i class="fas fa-check-circle"></i>Inventory Management — 100 Cars</li>
+          <li><i class="fas fa-check-circle"></i>Car Listings</li>
+          <li><i class="fas fa-check-circle"></i>Lead Management</li>
+          <li><i class="fas fa-check-circle"></i>CRM</li>
+          <li><i class="fas fa-check-circle"></i>3 Staff / Agents</li>
+          <li><i class="fas fa-check-circle"></i>Follow-up &amp; Reminders</li>
+          <li><i class="fas fa-check-circle"></i>Deals &amp; Sales</li>
+          <li><i class="fas fa-check-circle"></i>Finance Management</li>
+          <li><i class="fas fa-check-circle"></i>Document Management</li>
+          <li><i class="fas fa-check-circle"></i>Reports &amp; Analytics</li>
+          <li><i class="fas fa-check-circle"></i>Caryanams Marketing</li>
+          <li><i class="fas fa-check-circle"></i>Car Studio — 100/month</li>
+          <li><i class="fas fa-check-circle"></i>Image Enhancement</li>
+          <li><i class="fas fa-check-circle"></i>Dealer Website</li>
+          <li><i class="fas fa-check-circle"></i>Challan / RTO / History Check — 20/month each</li>
+          <li><i class="fas fa-check-circle"></i>AI Price Suggestion</li>
+          <li><i class="fas fa-check-circle"></i>Stock Aging Analysis</li>
+          <li><i class="fas fa-check-circle"></i>Inventory Profitability</li>
+          <li><i class="fas fa-check-circle"></i>Priority Support</li>
+        </ul>
+        <button class="btn btn-primary btn-full" id="btnGrowth" onclick="openConfirmModal('growth')">
+          <i class="fas fa-bolt"></i> Activate Growth — ₹999/mo
+        </button>
+      </div>
+    </div>
+
+    <!-- Pro -->
+    <div class="plan-card" id="cardPro">
+      <div class="plan-body">
+        <div class="plan-name">Pro (Mini Website)</div>
+        <div class="plan-price-wrap">
+          <span class="plan-price">₹1,999</span>
+          <span class="plan-period">/month</span>
+        </div>
+        <ul class="plan-features">
+          <li><i class="fas fa-check-circle"></i>Dealer Dashboard</li>
+          <li><i class="fas fa-check-circle"></i>Inventory Management — Unlimited</li>
+          <li><i class="fas fa-check-circle"></i>Car Listings</li>
+          <li><i class="fas fa-check-circle"></i>Lead Management — Advanced</li>
+          <li><i class="fas fa-check-circle"></i>CRM</li>
+          <li><i class="fas fa-check-circle"></i>10 Staff / Agents</li>
+          <li><i class="fas fa-check-circle"></i>Follow-up &amp; Reminders</li>
+          <li><i class="fas fa-check-circle"></i>Deals &amp; Sales</li>
+          <li><i class="fas fa-check-circle"></i>Finance Management</li>
+          <li><i class="fas fa-check-circle"></i>Document Management</li>
+          <li><i class="fas fa-check-circle"></i>Reports &amp; Analytics — Advanced</li>
+          <li><i class="fas fa-check-circle"></i>Caryanams Marketing</li>
+          <li><i class="fas fa-check-circle"></i>Car Studio — 500/month</li>
+          <li><i class="fas fa-check-circle"></i>Image Enhancement</li>
+          <li><i class="fas fa-check-circle"></i>Dealer Website — Advanced (Mini Website)</li>
+          <li><i class="fas fa-check-circle"></i>Challan / RTO / History Check — 100/month each</li>
+          <li><i class="fas fa-check-circle"></i>AI Price Suggestion — Advanced</li>
+          <li><i class="fas fa-check-circle"></i>Stock Aging Analysis</li>
+          <li><i class="fas fa-check-circle"></i>Inventory Profitability — Advanced</li>
+          <li><i class="fas fa-check-circle"></i>Dead Stock Alerts</li>
+          <li><i class="fas fa-check-circle"></i>Market Price Intelligence</li>
+          <li><i class="fas fa-check-circle"></i>Buy / Don't Buy Recommendation</li>
+          <li><i class="fas fa-check-circle"></i>Dealer-to-Dealer</li>
+          <li><i class="fas fa-check-circle"></i>Priority Support</li>
+        </ul>
+        <button class="btn btn-primary btn-full" id="btnPro" onclick="openConfirmModal('pro')">
+          <i class="fas fa-bolt"></i> Activate Pro — ₹1,999/mo
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Security Footer -->
+  <div class="security-footer">
+    <i class="fas fa-flask" style="color:#d97706"></i> Demo payment mode &nbsp;·&nbsp;
+    <i class="fas fa-lock"></i> Razorpay support ready, awaiting API keys
+  </div>
+
+</div><!-- /container -->
+
+<!-- ── Confirmation Modal ── -->
+<div id="confirmModal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div>
+        <div style="font-family:'Montserrat',sans-serif;font-size:18px;font-weight:800">Confirm Plan Activation</div>
+        <div id="modalSubtitle" style="font-size:13px;opacity:0.75;margin-top:4px">Review your selection</div>
+      </div>
+      <button class="modal-close" onclick="closeConfirmModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+
+      <div class="amount-badge">
+        <div class="amount-badge-inner">
+          <div class="amount-label" id="modalPlanName">—</div>
+          <div id="modalAmount" class="amount-value">₹—</div>
+          <div class="amount-plan" id="modalPeriod">per month</div>
+        </div>
+      </div>
+
+      <ul class="modal-features" id="modalFeatures"></ul>
+
+      <div class="demo-info-box">
+        <i class="fas fa-flask" style="margin-top:2px"></i>
+        <span>Razorpay is not connected yet. <strong>Activate (Demo Payment)</strong> creates a demo payment record and activates the plan immediately — no real charge is made.</span>
+      </div>
+
+      <div class="modal-actions">
+        <button id="btnActivateDemo" class="btn btn-primary btn-full" onclick="confirmActivation('demo')">
+          <i class="fas fa-bolt"></i> Activate (Demo Payment)
+        </button>
+        <button id="btnUseFree" class="btn btn-outline btn-full" onclick="confirmActivation('free')">
+          <i class="fas fa-gift"></i> Use Free For Now
+        </button>
+        <button class="btn btn-full" style="background:transparent;color:#64748b" onclick="closeConfirmModal()">
+          Cancel
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ── Toasts ── -->
+<div id="toastContainer"></div>
+
+<script>
+  /* ── Plan catalogue — built directly from the server's PLANS list, so the
+     frontend can never drift out of sync with dealer/routes.py. ────────── */
+  var PLANS = {};
+  {% for p in plans %}
+  PLANS["{{ p.key }}"] = {
+    key: "{{ p.key }}",
+    name: {{ p.name | tojson }},
+    price: {{ p.price_inr }},
+    period: "{{ p.period }}",
+    features: {{ p.features | tojson }}
+  };
+  {% endfor %}
+
+  /* Admin-controlled switch — mirrors ALLOW_FREE_PLAN_ACTIVATION on the backend. */
+  var ALLOW_FREE_PLAN_ACTIVATION = {{ 'true' if allow_free_plan else 'false' }};
+
+  /* Backend endpoint this page POSTs to. Wired live to the Flask route —
+     /dealer/subscription/activate already exists, so USE_BACKEND stays on.
+     If the backend ever fails to respond (e.g. mid-deploy), the page still
+     falls back to the local demo flow automatically, so this can never
+     leave a dealer stuck on an error. */
+  var USE_BACKEND   = true;
+  var ACTIVATE_URL  = "{{ url_for('dealer.activate_subscription') }}";
+  var DASHBOARD_URL = "{{ url_for('dealer.dashboard') }}";
+
+  /* v29: injected fresh from the database on every page load — the browser is
+     no longer a source of truth about who has paid. */
+  var HAS_ACTIVE_PLAN = {{ 'true' if has_active_plan else 'false' }};
+  var IS_ONBOARDING   = {{ 'true' if onboarding else 'false' }};
+  var BACK_TO_DMS_URL = HAS_ACTIVE_PLAN ? DASHBOARD_URL : "{{ url_for('auth.logout', **{'as': 'dealer'}) }}";
+
+  /* Seed local state from the real subscription the server already knows
+     about, so the banner is correct on first load even before any client
+     activation happens. */
+  var SERVER_SUB = {{ ({
+        'plan': current_sub.plan_name,
+        'amount': current_sub.price,
+        'paymentMethod': current_sub.payment_method,
+        'paymentStatus': current_sub.payment_status,
+        'transactionId': current_sub.transaction_id,
+        'activatedAt': current_sub.activated_at.isoformat() if current_sub.activated_at else None,
+        'expiresAt': current_sub.expires_at.isoformat() if current_sub.expires_at else None
+      } if current_sub else None) | tojson }};
+
+  /* v29: subscription state is NEVER persisted in the browser. The old
+     localStorage cache leaked one dealer's plan to the next person on a shared
+     machine, and let a plan look "active" with no database row behind it.
+     Any key left over from v28 is purged here. */
+  try { localStorage.removeItem('caryanams_demo_subscription'); } catch (e) {}
+  var _memState = SERVER_SUB;
+  var _selectedPlanKey = null;
+  var _busy = false;
+
+  /* ── Back button: go to DMS dashboard if it exists, else just go back ── */
+  document.getElementById('backToDmsBtn').addEventListener('click', function(e) {
+    // If this file is opened standalone (no DMS route available), fall back
+    // to browser history instead of a dead link.
+    if (BACK_TO_DMS_URL === '#' || window.location.protocol === 'file:') {
+      e.preventDefault();
+      if (window.history.length > 1) { window.history.back(); }
+    }
+  });
+  document.getElementById('backToDmsBtn').setAttribute('href', BACK_TO_DMS_URL);
+
+  /* ── Local "current subscription" state (demo persistence) ───────────── */
+  function loadState() { return _memState; }
+  function saveState(state) { _memState = state; }
+
+  function generateTransactionId() {
+    var year = new Date().getFullYear();
+    var seq = Math.floor(1000 + Math.random() * 9000); // 4-digit demo sequence
+    return 'DEMO-' + year + seq;
+  }
+
+  function formatDate(d) {
+    var dt = new Date(d);
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return dt.getDate() + ' ' + months[dt.getMonth()] + ' ' + dt.getFullYear();
+  }
+
+  function renderBanner() {
+    /* v29.1: driven by HAS_ACTIVE_PLAN (injected from the database), not by
+       "is there any state object?". The old version defaulted planKey to
+       'starter' whenever state was null, so an unsubscribed dealer saw
+       "Starter · Active" and a disabled "Current Plan" button. */
+    var state   = loadState();
+    var hasPlan = !!HAS_ACTIVE_PLAN;
+    var planKey = hasPlan ? ((state && state.plan) || 'starter') : null;
+    var plan    = planKey ? (PLANS[planKey] || PLANS.starter) : null;
+
+    document.getElementById('bannerPlanName').textContent =
+      plan ? plan.name : 'No active plan';
+
+    var expiryEl = document.getElementById('bannerExpiry');
+    if (hasPlan && state && state.expiresAt) {
+      expiryEl.textContent = 'Valid until ' + formatDate(state.expiresAt);
+    } else if (hasPlan) {
+      expiryEl.textContent = 'Active';
+    } else {
+      expiryEl.textContent = 'Choose a plan below to unlock your dashboard';
+    }
+
+    var statusEl = document.getElementById('bannerStatus');
+    if (!hasPlan) {
+      statusEl.className = 'badge-pending';
+      statusEl.innerHTML = '<i class="fas fa-clock"></i> Not Active';
+    } else if (state && state.paymentStatus === 'Pending') {
+      statusEl.className = 'badge-pending';
+      statusEl.innerHTML = '<i class="fas fa-clock"></i> Payment Pending';
+    } else {
+      statusEl.className = 'badge-success';
+      statusEl.innerHTML = '<i class="fas fa-check-circle"></i> Active';
+    }
+
+    /* Mark the current plan; keep every other plan selectable. */
+    ['starter', 'growth', 'pro'].forEach(function(key) {
+      var card = document.getElementById('card' + key.charAt(0).toUpperCase() + key.slice(1));
+      var btn  = document.getElementById('btn' + key.charAt(0).toUpperCase() + key.slice(1));
+      if (!card || !btn) return;
+
+      if (hasPlan && key === planKey) {
+        card.classList.add('is-current');
+        btn.disabled  = true;
+        btn.className = 'btn btn-success btn-full';
+        btn.innerHTML = '<i class="fas fa-check"></i> Current Plan';
+        btn.onclick   = null;
+        return;
+      }
+
+      card.classList.remove('is-current');
+      btn.disabled  = false;
+      btn.className = 'btn btn-primary btn-full';
+
+      if (PLANS[key].price === 0) {
+        /* Free plan: no payment step, no modal — straight to the dashboard. */
+        btn.innerHTML = '<i class="fas fa-arrow-right"></i> Continue Free — Go to Dashboard';
+        btn.onclick   = activateFreePlan;
+      } else {
+        btn.innerHTML = '<i class="fas fa-bolt"></i> ' + (hasPlan ? 'Switch to ' : 'Activate ') +
+                        PLANS[key].name.split(' (')[0] + ' — ₹' +
+                        PLANS[key].price.toLocaleString('en-IN') + '/mo';
+        btn.onclick   = (function(k) { return function() { openConfirmModal(k); }; })(key);
+      }
+    });
+
+    // Last payment strip
+    var lpBox = document.getElementById('lastPaymentBox');
+    if (state && state.transactionId) {
+      lpBox.style.display = 'flex';
+      document.getElementById('lpTxn').textContent    = state.transactionId;
+      document.getElementById('lpMethod').textContent = state.paymentMethod;
+      document.getElementById('lpAmount').textContent = '₹' + (state.amount || 0).toLocaleString('en-IN');
+      document.getElementById('lpStatus').textContent = state.paymentStatus;
+    } else if (state && state.paymentMethod === 'Free') {
+      lpBox.style.display = 'flex';
+      document.getElementById('lpTxn').textContent    = '—';
+      document.getElementById('lpMethod').textContent = 'Free';
+      document.getElementById('lpAmount').textContent = '₹0';
+      document.getElementById('lpStatus').textContent = 'Free Trial';
+    } else {
+      lpBox.style.display = 'none';
+    }
+  }
+
+  /* ── Modal ─────────────────────────────────────────────────────────── */
+  function openConfirmModal(planKey) {
+    var plan = PLANS[planKey];
+    if (!plan) { showToast('error', 'Invalid plan', 'That plan could not be found.'); return; }
+
+    _selectedPlanKey = planKey;
+    document.getElementById('modalSubtitle').textContent = plan.name + ' Plan';
+    document.getElementById('modalPlanName').textContent = plan.name + ' Plan · Monthly';
+    document.getElementById('modalAmount').textContent   = plan.price === 0 ? 'Free' : ('₹' + plan.price.toLocaleString('en-IN'));
+    document.getElementById('modalPeriod').textContent   = plan.price === 0 ? '' : ('per ' + plan.period);
+
+    var featuresHtml = '';
+    plan.features.forEach(function(f) {
+      featuresHtml += '<li><i class="fas fa-check-circle"></i>' + f + '</li>';
+    });
+    document.getElementById('modalFeatures').innerHTML = featuresHtml;
+
+    // Hide / show "Use Free For Now" per admin setting
+    var freeBtn = document.getElementById('btnUseFree');
+    freeBtn.style.display = ALLOW_FREE_PLAN_ACTIVATION ? 'inline-flex' : 'none';
+
+    document.getElementById('confirmModal').style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeConfirmModal() {
+    if (_busy) return;
+    document.getElementById('confirmModal').style.display = 'none';
+    document.body.style.overflow = '';
+  }
+
+  document.getElementById('confirmModal').addEventListener('click', function(e) {
+    if (e.target === this) closeConfirmModal();
+  });
+
+  /* ── Toasts ────────────────────────────────────────────────────────── */
+  function showToast(type, title, msg) {
+    var icon = type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle';
+    var el = document.createElement('div');
+    el.className = 'toast ' + type;
+    el.innerHTML = '<i class="fas ' + icon + '"></i><div><strong style="display:block;margin-bottom:2px">' + title + '</strong><span style="color:#64748b">' + msg + '</span></div>';
+    document.getElementById('toastContainer').appendChild(el);
+    setTimeout(function() {
+      el.style.transition = 'opacity .3s';
+      el.style.opacity = '0';
+      setTimeout(function() { el.remove(); }, 300);
+    }, 4500);
+  }
+
+  function setButtonsBusy(busy) {
+    _busy = busy;
+    var demoBtn = document.getElementById('btnActivateDemo');
+    var freeBtn = document.getElementById('btnUseFree');
+    if (demoBtn) demoBtn.disabled = busy;
+    if (freeBtn) freeBtn.disabled = busy;
+  }
+
+  /* ── Core fix: this used to error out on "Use Free For Now" because the
+     old file had no free-plan branch at all (button didn't exist) and the
+     paid flow expected a live Razorpay/UPI response. Both paths now resolve
+     locally with try/catch, so neither button can ever throw an uncaught
+     error in demo/testing mode. ────────────────────────────────────────── */
+  function confirmActivation(method) {
+    if (!_selectedPlanKey || _busy) return;
+
+    if (method === 'free' && !ALLOW_FREE_PLAN_ACTIVATION) {
+      showToast('error', 'Free activation disabled', 'Free plan activation is currently disabled by admin.');
+      return;
+    }
+
+    var plan = PLANS[_selectedPlanKey];
+    if (!plan) {
+      showToast('error', 'Invalid plan', 'Please pick a plan again.');
+      return;
+    }
+
+    setButtonsBusy(true);
+    var demoBtn = document.getElementById('btnActivateDemo');
+    var originalHtml = (method === 'demo' && demoBtn) ? demoBtn.innerHTML : null;
+    if (method === 'demo' && demoBtn) {
+      demoBtn.innerHTML = '<i class="fas fa-spinner spin"></i> Processing…';
+    }
+
+    var finish = function(success, message, info) {
+      setButtonsBusy(false);
+      if (method === 'demo' && demoBtn && originalHtml) demoBtn.innerHTML = originalHtml;
+      if (success) {
+        /* v29-activated-redirect */
+        closeConfirmModal();
+        HAS_ACTIVE_PLAN = true;
+        renderBanner();
+
+        var amountDisplay = (info && info.amount) ? ('₹' + info.amount) : 'Free';
+        var activationDate = new Date().toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' });
+
+        /* Payment/Activation → User Dashboard: the final hop of the flow. */
+        var _redirectTo = (info && info.redirectUrl) || DASHBOARD_URL;
+        showSuccessPopup(
+          '🎉 Plan Activated',
+          'Subscription Active',
+          buildSpRow('Plan Name', (info && info.planName) || plan.name) +
+          buildSpRow('Amount', amountDisplay) +
+          buildSpRow('Validity', '30 Days') +
+          buildSpRow('Activation Date', activationDate),
+          { redirect: _redirectTo }
+        );
+        /* Safety net in case the popup is dismissed without the button. */
+        setTimeout(function() {
+          if (window.location.href.indexOf(_redirectTo) === -1) {
+            window.location.href = _redirectTo;
+          }
+        }, 9000);
+      } else {
+        showToast('error', 'Could not activate plan', message);
+      }
+    };
+
+    /* v29: the local (offline) activation path has been removed. It wrote a
+       browser-only subscription that the server knew nothing about, which
+       both bypassed payment and disappeared on the next login. */
+
+    if (USE_BACKEND) {
+      fetch(ACTIVATE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: plan.key, method: method })
+      })
+      .then(function(r) { return r.json().then(function(data) { return { ok: r.ok, data: data }; }); })
+      .then(function(res) {
+        if (res.ok && res.data && res.data.success) {
+          finish(true, res.data.message || 'Subscription activated.', {
+            planName: res.data.plan_name,
+            amount: res.data.amount,
+            redirectUrl: res.data.redirect_url
+          });
+        } else {
+          finish(false, (res.data && res.data.error) || 'Please try again.');
+        }
+      })
+      .catch(function() {
+        /* v29: no client-side fallback. A plan exists in the database or it
+           does not exist at all — otherwise the dashboard gate would be asked
+           to honour an activation the server never recorded. */
+        finish(false, 'Could not reach the server. Please check your connection and try again.');
+      });
+    } else {
+      finish(false, 'Activation is unavailable right now. Please try again shortly.');
+    }
+  }
+
+  /* ── Free plan: one click, no payment step ──────────────────────────────
+     The ₹0 plan carries no charge, so it skips the confirmation modal and
+     every payment field. The order matters: the server writes the
+     subscription row first, and only on a confirmed success does the browser
+     navigate. That way the plan gate on /dealer/dashboard always finds an
+     active plan, and the state survives a refresh, a logout and a new device
+     because it lives in the database rather than in this page. */
+  function activateFreePlan() {
+    if (_busy) return;
+
+    var btn = document.getElementById('btnStarter');
+    var originalHtml = btn ? btn.innerHTML : null;
+
+    _busy = true;
+    if (btn) {
+      btn.disabled  = true;
+      btn.innerHTML = '<i class="fas fa-spinner spin"></i> Activating…';
+    }
+
+    var restore = function() {
+      _busy = false;
+      if (btn) {
+        btn.disabled = false;
+        if (originalHtml) btn.innerHTML = originalHtml;
+      }
+    };
+
+    fetch(ACTIVATE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ plan: 'starter', method: 'free' })
+    })
+    .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+    .then(function(res) {
+      if (res.ok && res.data && res.data.success) {
+        HAS_ACTIVE_PLAN = true;
+        window.location.href = res.data.redirect_url || DASHBOARD_URL;
+      } else {
+        restore();
+        showToast('error', 'Could not activate the Free plan',
+                  (res.data && res.data.error) || 'Please try again.');
+      }
+    })
+    .catch(function() {
+      restore();
+      showToast('error', 'Could not reach the server',
+                'Please check your connection and try again.');
+    });
+  }
+
+  /* ── Init ──────────────────────────────────────────────────────────── */
+  renderBanner();
+</script>
+{% include '_success_popup.html' %}
+</body>
+</html>
