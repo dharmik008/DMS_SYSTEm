@@ -48,6 +48,10 @@ def create_app():
     app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(__file__), 'static', 'images', 'uploads')
     app.config['KYC_UPLOAD_FOLDER']     = os.path.join(os.path.dirname(__file__), 'static', 'uploads', 'dealers')
     app.config['VEHICLE_UPLOAD_FOLDER'] = os.path.join(os.path.dirname(__file__), 'static', 'uploads', 'vehicles')
+    # Vehicle and customer documents (RC, Aadhaar, PAN…) are kept outside /static and
+    # served only through an owner-checked route. Point this at persistent storage.
+    app.config['PRIVATE_DOCUMENTS_FOLDER'] = os.environ.get(
+        'PRIVATE_DOCUMENTS_FOLDER', os.path.join(app.instance_path, 'private_documents'))
     app.config['ALLOWED_IMAGE_EXTENSIONS'] = {'jpg', 'jpeg', 'png', 'webp'}
     app.config['MAX_IMAGE_SIZE']        = 10 * 1024 * 1024   # 10 MB per image
     app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024   # 100 MB
@@ -111,6 +115,7 @@ def create_app():
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
     os.makedirs(app.config['KYC_UPLOAD_FOLDER'],     exist_ok=True)
     os.makedirs(app.config['VEHICLE_UPLOAD_FOLDER'], exist_ok=True)
+    os.makedirs(app.config['PRIVATE_DOCUMENTS_FOLDER'], exist_ok=True)
     os.makedirs(os.path.join(os.path.dirname(__file__), 'static', 'processed'),           exist_ok=True)
     os.makedirs(os.path.join(os.path.dirname(__file__), 'static', 'custom_bgs'),         exist_ok=True)
     os.makedirs(os.path.join(os.path.dirname(__file__), 'static', 'images', 'defaults'), exist_ok=True)
@@ -184,6 +189,11 @@ def create_app():
     app.register_blueprint(portal_bp,      url_prefix='')     # /portal — decides dashboard vs plan selection
     # app.register_blueprint(owner_bp,       url_prefix='/xo')    # hidden URL — do not expose (DISABLED, see above)
 
+    # TEMPORARY dealer demo login until the SMS OTP API is live. Stays off
+    # unless DEMO_LOGIN_ENABLED=True in .env — see auth/demo_login.py.
+    from auth.demo_login import init_app as _init_demo_login
+    _init_demo_login(app)
+
     # ── Create all tables (including studio_image and admin_logs) ─────────────
     from models import (seed_demo_data, AdminLog, SubAdmin,
                         CentralDocumentStorage, CentralDocumentAuditLog,
@@ -202,6 +212,11 @@ def create_app():
         # Set SCHEMA_AUTO_SYNC=0 to turn it off and migrate by hand instead.
         from schema_sync import auto_sync
         auto_sync(db)
+
+        # Customer inquiries are stored as CRM leads: add the duplicate guard
+        # to older databases and copy any old inquiries into leads (once).
+        from utils.inquiry_leads import prepare_database
+        prepare_database()
 
         # ── Migrate: add new columns to admin_logs if they don't exist ──────────
         # Uses information_schema instead of SQLite PRAGMA table_info
@@ -318,6 +333,11 @@ def create_app():
 
         seed_demo_data()
 
+        # Deals saved before the Purchase → Sale Trail kept a history get one
+        # starting entry, so every deal reads as a single timeline.
+        from utils.deal_history import start_tracking_existing_deals
+        start_tracking_existing_deals()
+
         # ── Migrate: Reassign display IDs (D1/D2, U1/U2, SA1/SA2) ───────────
         try:
             from sqlalchemy import text as _text
@@ -368,6 +388,18 @@ def create_app():
             color_options=color_options,
             normalise_color=normalise_color,
         )
+
+    # ── Status dropdowns — one option list per status field ───────────────
+    #   {{ status_label('deal', deal['status']) }}
+    # Globals rather than a context processor, so the macros in
+    # templates/dealer/_status.html can use them when imported.
+    from utils.statuses import selected_status, status_label, status_options, status_tone
+    app.jinja_env.globals.update(
+        selected_status=selected_status,
+        status_label=status_label,
+        status_options=status_options,
+        status_tone=status_tone,
+    )
 
     # ── v29: subscription firewall ─────────────────────────────────────────
     # Registered AFTER load_user so g.user is populated when it runs.
@@ -449,6 +481,10 @@ def create_app():
             return '₹{:,.0f}'.format(float(v))
         except Exception:
             return '—'
+
+    # {{ lead['inquiry_type']|inquiry_type }}  →  "Test Drive"
+    from utils.inquiry_leads import inquiry_type_label
+    app.add_template_filter(inquiry_type_label, 'inquiry_type')
 
     # ── Global JSON error handlers (prevent HTML error pages reaching JS) ─────
     # FIX: Without these, Flask returns HTML 404/500 pages which cause the
