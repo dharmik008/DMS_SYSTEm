@@ -1,4 +1,5 @@
-from flask import Blueprint, render_template, request, redirect, url_for, flash, session, g, current_app, jsonify
+from flask import (Blueprint, render_template, request, redirect, url_for, flash, session, g,
+                   current_app, jsonify, abort, send_from_directory)
 from functools import wraps
 import os
 import uuid
@@ -19,14 +20,24 @@ from db import (
     agents_get_by_dealer, agents_get_leads_count, agent_create, agent_update, agent_delete, agent_get,
     deals_get_by_dealer, deals_get_recent, deals_get_status_counts, deals_get_financial_summary,
     deals_get_monthly_revenue, deal_create, deal_update, deal_get, leads_get_source_counts,
-    documents_get_by_dealer, document_create, document_delete,
-    inquiries_get_by_dealer, inquiry_update_status,
+    documents_get_by_dealer, cds_dealer_active_docs,
     user_update_subscription,
     # v29.2 expense/profit helpers
     expense_create, expense_get, expenses_get_by_vehicle, expense_update, expense_delete,
     vehicle_profit_summary, inventory_profit_dashboard,
 )
 from models import db, User, Vehicle, VehicleImage
+from utils.deal_history import MAX_NOTE_LENGTH, DealStatusConflict, history_by_deal
+from utils.statuses import (
+    DEAL, DOCUMENT, VEHICLE, InvalidStatus, clean_status, same_status, status_label, status_values,
+)
+from utils.vehicle_documents import (
+    CUSTOMER_DOC_TYPES, MAX_DOCUMENT_BYTES, VEHICLE_DOC_TYPES, DocumentSaveError,
+    apply_saved_document_changes, attach_document, document_folder, link_customer,
+    remove_unlinked_document, save_documents, saved_documents, set_vehicle_customer,
+    unlinked_documents, validate_document_submission, validate_saved_document_changes,
+    vehicle_choices,
+)
 from utils.image_utils import save_uploaded_image, is_allowed_image
 from utils.vehicle_issues import detect_vehicle_issues
 from subscription_features import feature_required
@@ -148,6 +159,18 @@ def kyc_required(f):
 
 def get_dealer_id():
     return g.user['id'] if g.user else None
+
+
+def _redirect_back(endpoint, **values):
+    """
+    Back to the page an inline form was posted from (its hidden 'next' field),
+    else to endpoint. Only paths inside the dealer app are followed, so the
+    field cannot send anyone to another site.
+    """
+    target = request.form.get('next') or ''
+    if target.startswith('/dealer/') and not any(c in target for c in '\r\n\\'):
+        return redirect(target)
+    return redirect(url_for(endpoint, **values))
 
 # ========== KYC UPLOAD (dealer-side) ==========
 
@@ -271,10 +294,6 @@ def dashboard():
     recent_leads = leads_get_by_dealer(dealer_id, page=1, per_page=5)['items']
     recent_deals = deals_get_recent(dealer_id)
     financial = deals_get_financial_summary(dealer_id)
-    # FIXED: fetch latest 5 inquiries so the dashboard widget can display them
-    recent_inquiries = inquiries_get_by_dealer(dealer_id)[:5]
-    pending_inquiries = sum(
-        1 for i in recent_inquiries if i['status'] == 'pending')
     # v29.2: inventory profit summary cards
     profit_summary = inventory_profit_dashboard(dealer_id)
 
@@ -289,8 +308,6 @@ def dashboard():
                            lead_stages=lead_stages,
                            recent_leads=recent_leads,
                            recent_deals=recent_deals,
-                           recent_inquiries=recent_inquiries,       # FIXED: now passed to template
-                           pending_inquiries=pending_inquiries,     # FIXED: badge count for pending
                            profit_summary=profit_summary,           # v29.2
                            )
 
@@ -318,16 +335,23 @@ def inventory():
     for v in vehicles['items']:
         v['vehicle_issues'] = detect_vehicle_issues(v)
 
+    # Documents no vehicle page shows (uploaded without a vehicle, or whose
+    # vehicle was deleted) and admin-assigned files, so that none go missing.
+    other_documents = unlinked_documents(dealer_id)
     return render_template('dealer/inventory.html', vehicles=vehicles, status_filter=status,
                            fuel_filter=fuel, search=search, aging_filter=aging,
-                           quota=check_quota(dealer_id, current_plan_key(), 'vehicles', adding=0))
+                           quota=check_quota(dealer_id, current_plan_key(), 'vehicles', adding=0),
+                           other_documents=other_documents,
+                           admin_documents=cds_dealer_active_docs(dealer_id),
+                           attach_vehicles=vehicle_choices(dealer_id) if other_documents else [],
+                           today=_now_ist().date())
 
 
 @dealer_bp.route('/api/vehicle/<int:vehicle_id>/contacts')
 @dealer_required
 def vehicle_contacts_api(vehicle_id):
     """
-    People who already raised a lead or an inquiry about this vehicle.
+    People who already raised a lead about this vehicle (inquiries included).
 
     Feeds the suggestion list in Customer Info on the New Deal page.
 
@@ -377,6 +401,13 @@ def inventory_alerts_api():
 
 
 
+@dealer_bp.context_processor
+def _vehicle_document_options():
+    """Choices for the document entries on the Add / Edit Vehicle form."""
+    return {'vehicle_doc_types': VEHICLE_DOC_TYPES, 'customer_doc_types': CUSTOMER_DOC_TYPES,
+            'max_document_mb': MAX_DOCUMENT_BYTES // (1024 * 1024)}
+
+
 @dealer_bp.route('/inventory/add', methods=['GET', 'POST'])
 @dealer_required
 @kyc_required
@@ -414,6 +445,19 @@ def add_vehicle():
             )
             return render_template('dealer/vehicle_form.html', action='Add', vehicle=None)
 
+        # Documents are checked before anything is saved, so a bad file never
+        # leaves a half-saved vehicle behind.
+        doc_entries, errors = validate_document_submission(request.form, request.files)
+        try:
+            vehicle_status = clean_status(VEHICLE, request.form.get('status'))
+        except InvalidStatus as exc:
+            errors.append(str(exc))
+        if errors:
+            for message in errors:
+                flash(message, 'error')
+            return render_template('dealer/vehicle_form.html', action='Add', vehicle=None)
+        customer = link_customer(dealer_id, request.form)
+
         # ── Primary image: first mandatory slot (front) or explicit 'image' field ──
         # Try 'image' field first (explicit primary); fall back to 'front' slot
         image_file = request.files.get('image') or request.files.get('img_front')
@@ -440,7 +484,7 @@ def add_vehicle():
             # the dealer form. The columns stay — admin can still set them — so
             # these keep the values the old form defaulted to.
             'condition': request.form.get('condition') or 'used',
-            'status': request.form.get('status'),
+            'status': vehicle_status,
             'description': request.form.get('description'),
             'vin_number': (request.form.get('vin_number') or '').strip().upper(),
             'registration_number': (request.form.get('registration_number') or '').strip().upper(),
@@ -461,6 +505,7 @@ def add_vehicle():
             'seller_email':   (request.form.get('seller_email') or '').strip().lower(),
             'seller_address': (request.form.get('seller_address') or '').strip(),
             'seller_city':    (request.form.get('seller_city') or '').strip(),
+            'customer_id':    customer.id if customer else None,
             # v29.2 cost/profit fields
             'purchase_price': float(request.form.get('purchase_price') or 0) or None,
         }
@@ -530,10 +575,30 @@ def add_vehicle():
                 current_app.logger.error(f'add_vehicle image commit error: {e}')
 
         log_dealer_action(f'Added vehicle: {vehicle_data.get("make")} {vehicle_data.get("model")} {vehicle_data.get("year")}', 'Vehicles')
-        flash('Vehicle added successfully', 'success')
+        try:
+            saved_docs = save_documents(dealer_id=dealer_id, vehicle_id=vehicle_id, customer=customer,
+                                        entries=doc_entries, owner_name=vehicle_data['seller_name'])
+        except DocumentSaveError:
+            # The vehicle itself is saved: re-attach on its edit page rather than
+            # resubmitting this form, which would add the vehicle a second time.
+            flash('Vehicle added, but its documents could not be saved. '
+                  'Please attach them again below.', 'error')
+            return redirect(url_for('dealer.edit_vehicle', vid=vehicle_id))
+        if saved_docs:
+            log_dealer_action(f'Uploaded {saved_docs} document(s) for vehicle #{vehicle_id}', 'Documents')
+        flash('Vehicle added successfully'
+              + (f' with {saved_docs} document(s)' if saved_docs else ''), 'success')
         return redirect(url_for('dealer.inventory'))
 
     return render_template('dealer/vehicle_form.html', action='Add', vehicle=None)
+
+
+def _attach_typed_images(vehicle: dict, vid: int) -> None:
+    """The saved photos by slot, so the Edit form shows those slots as filled."""
+    vehicle['extra_images_typed'] = [
+        {'filename': img.filename, 'image_type': img.image_type, 'id': img.id}
+        for img in VehicleImage.query.filter_by(vehicle_id=vid).all()
+    ]
 
 
 @dealer_bp.route('/inventory/edit/<int:vid>', methods=['GET', 'POST'])
@@ -547,7 +612,26 @@ def edit_vehicle(vid):
         flash('Vehicle not found', 'error')
         return redirect(url_for('dealer.inventory'))
 
+    documents = saved_documents(dealer_id, vehicle)
+
     if request.method == 'POST':
+        # New documents, and edits / removals of saved ones, are all checked
+        # before anything is written.
+        doc_entries, errors = validate_document_submission(request.form, request.files)
+        doc_changes, change_errors = validate_saved_document_changes(
+            request.form, request.files, documents)
+        errors += change_errors
+        try:
+            vehicle_status = clean_status(VEHICLE, request.form.get('status'),
+                                          current=vehicle.get('status'))
+        except InvalidStatus as exc:
+            errors.append(str(exc))
+        if errors:
+            for message in errors:
+                flash(message, 'error')
+            _attach_typed_images(vehicle, vid)
+            return render_template('dealer/vehicle_form.html', action='Edit', vehicle=vehicle,
+                                   **documents)
         image_file = request.files.get('image')
 
         if image_file and image_file.filename and is_allowed_image(image_file.filename):
@@ -571,7 +655,7 @@ def edit_vehicle(vid):
             'price': float(request.form.get('price')),
             'negotiable': request.form.get('negotiable') == 'on',
             'condition': request.form.get('condition') or vehicle.get('condition') or 'used',
-            'status': request.form.get('status'),
+            'status': vehicle_status,
             # Description was removed from the dealer form, but both customer-facing
             # car detail pages still show it. Fall back to what is stored so an edit
             # never blanks a live listing.
@@ -657,18 +741,31 @@ def edit_vehicle(vid):
                 current_app.logger.error(f'edit_vehicle image commit error: {e}')
 
         vehicle_update(vid, update_data)
+        customer = link_customer(dealer_id, request.form, current_id=vehicle.get('customer_id'))
+        set_vehicle_customer(vid, customer)
+        try:
+            saved_docs = save_documents(dealer_id=dealer_id, vehicle_id=vid, customer=customer,
+                                        entries=doc_entries, owner_name=update_data['seller_name'])
+            changed = apply_saved_document_changes(dealer_id, doc_changes)
+        except DocumentSaveError:
+            flash('Vehicle updated, but its document changes could not be saved. '
+                  'Please make them again.', 'error')
+            return redirect(url_for('dealer.edit_vehicle', vid=vid, _anchor='documents'))
+        if saved_docs:
+            log_dealer_action(f'Uploaded {saved_docs} document(s) for vehicle #{vid}', 'Documents')
+        if changed.total:
+            log_dealer_action(f'Vehicle #{vid}: {changed.summary()}', 'Documents')
         log_dealer_action(f'Updated vehicle: {update_data.get("make")} {update_data.get("model")} (ID:{vid})', 'Vehicles')
-        flash('Vehicle updated successfully', 'success')
+        message = 'Vehicle updated successfully'
+        if saved_docs:
+            message += f' with {saved_docs} new document(s)'
+        if changed.total:
+            message += f' ({changed.summary()})'
+        flash(message, 'success')
         return redirect(url_for('dealer.inventory'))
 
-    # ── GET: load existing typed images for pre-filling the form ─────────────
-    existing_typed_imgs = VehicleImage.query.filter_by(vehicle_id=vid).all()
-    vehicle['extra_images_typed'] = [
-        {'filename': img.filename, 'image_type': img.image_type, 'id': img.id}
-        for img in existing_typed_imgs
-    ]
-
-    return render_template('dealer/vehicle_form.html', action='Edit', vehicle=vehicle)
+    _attach_typed_images(vehicle, vid)
+    return render_template('dealer/vehicle_form.html', action='Edit', vehicle=vehicle, **documents)
 
 
 @dealer_bp.route('/inventory/delete/<int:vid>', methods=['POST'])
@@ -731,7 +828,61 @@ def inventory_detail(car_id):
                            vehicle=vehicle,
                            profit=profit,
                            expenses=expenses,
-                           expense_types=expense_types)
+                           expense_types=expense_types,
+                           today=_now_ist().date(),
+                           **saved_documents(dealer_id, vehicle))
+
+
+@dealer_bp.route('/inventory/<int:vid>/status', methods=['POST'])
+@dealer_required
+@kyc_required
+def update_vehicle_status(vid):
+    """The status dropdown on the Inventory cards and on Vehicle Details."""
+    vehicle = Vehicle.query.filter_by(id=vid, dealer_id=get_dealer_id()).first()
+    if vehicle is None:
+        flash('Vehicle not found', 'error')
+        return redirect(url_for('dealer.inventory'))
+    try:
+        new_status = clean_status(VEHICLE, request.form.get('status'), current=vehicle.status)
+    except InvalidStatus as exc:
+        flash(str(exc), 'error')
+        return _redirect_back('dealer.inventory_detail', car_id=vid)
+    if new_status != vehicle.status:
+        vehicle_update(vid, {'status': new_status})
+        log_dealer_action(f'Set vehicle ID:{vid} status to {new_status}', 'Vehicles')
+        message = f'Vehicle status set to {status_label(VEHICLE, new_status)}.'
+        if new_status == 'sold':
+            message += (' Sold vehicles leave the active inventory list; '
+                        'choose "Sold" in the status filter to see them.')
+        flash(message, 'success')
+    return _redirect_back('dealer.inventory_detail', car_id=vid)
+
+
+@dealer_bp.route('/inventory/documents/<int:docid>/attach', methods=['POST'])
+@dealer_required
+@kyc_required
+def attach_unlinked_document(docid):
+    """Inventory → Other Documents: link a document to one of the dealer's vehicles."""
+    vehicle_id = request.form.get('vehicle_id', type=int)
+    if vehicle_id is not None and attach_document(get_dealer_id(), docid, vehicle_id):
+        log_dealer_action(f'Attached document #{docid} to vehicle #{vehicle_id}', 'Documents')
+        flash('Document attached to the vehicle.', 'success')
+        return redirect(url_for('dealer.inventory_detail', car_id=vehicle_id, _anchor='documents'))
+    flash('Choose one of your vehicles to attach the document to.', 'error')
+    return redirect(url_for('dealer.inventory', _anchor='other-documents'))
+
+
+@dealer_bp.route('/inventory/documents/<int:docid>/delete', methods=['POST'])
+@dealer_required
+@kyc_required
+def delete_unlinked_document(docid):
+    """Inventory → Other Documents: delete a document and its file."""
+    if remove_unlinked_document(get_dealer_id(), docid):
+        log_dealer_action(f'Deleted document #{docid}', 'Documents')
+        flash('Document deleted', 'success')
+    else:
+        flash('Document not found', 'error')
+    return redirect(url_for('dealer.inventory', _anchor='other-documents'))
 
 
 # ========== INVENTORY EXPENSE API (v29.2) ==========
@@ -1400,9 +1551,8 @@ def deals():
                            deals=deals_list,
                            status_counts=status_counts,
                            status_filter=status,
-                           statuses=['negotiation', 'booked',
-                                     'finalized', 'delivered', 'cancelled']
-                           )
+                           statuses=status_values(DEAL),
+                           history=history_by_deal(dealer_id))
 
 
 @dealer_bp.route('/deals/add', methods=['GET', 'POST'])
@@ -1429,10 +1579,23 @@ def add_deal():
             flash('Final Price is required and must be greater than 0.', 'error')
             return render_template('dealer/deal_form.html', deal=None, vehicles=vehicles)
 
+        # The vehicle must be this dealer's own: the id comes from the form.
+        vehicle_id = request.form.get('vehicle_id', type=int)
+        if vehicle_id is None or Vehicle.query.filter_by(id=vehicle_id, dealer_id=dealer_id).first() is None:
+            flash('Please choose one of your vehicles.', 'error')
+            return render_template('dealer/deal_form.html', deal=None, vehicles=vehicles)
+        try:
+            status = clean_status(DEAL, request.form.get('status'))
+            document_status = clean_status(DOCUMENT, request.form.get('document_status'))
+            status_note = _status_note(request.form)
+        except ValueError as exc:
+            flash(str(exc), 'error')
+            return render_template('dealer/deal_form.html', deal=None, vehicles=vehicles)
+
         deal_data = {
             'dealer_id': dealer_id,
             'lead_id': request.form.get('lead_id') or None,
-            'vehicle_id': int(request.form.get('vehicle_id')),
+            'vehicle_id': vehicle_id,
             'customer_name': request.form.get('customer_name'),
             'customer_phone': customer_phone,
             'customer_email': request.form.get('customer_email'),
@@ -1447,12 +1610,13 @@ def add_deal():
             'emi_months': int(request.form.get('emi_months')) if request.form.get('emi_months') else None,
             'emi_amount': float(request.form.get('emi_amount')) if request.form.get('emi_amount') else None,
             'bank_name': request.form.get('bank_name'),
-            'status': request.form.get('status'),
+            'status': status,
+            'document_status': document_status,
             'booking_amount': float(request.form.get('booking_amount')) if request.form.get('booking_amount') else 0,
             'notes': request.form.get('notes')
         }
 
-        deal_id = deal_create(deal_data)
+        deal_id = deal_create(deal_data, changed_by=g.user, status_note=status_note)
         log_dealer_action(f'Created deal for {deal_data.get("customer_name", "customer")} — ₹{deal_data.get("final_price", 0):,.0f}', 'Sales')
         flash('Deal created successfully', 'success')
         return redirect(url_for('dealer.deals'))
@@ -1487,6 +1651,15 @@ def edit_deal(did_):
             flash('Final Price is required and must be greater than 0.', 'error')
             return render_template('dealer/deal_form.html', deal=deal, vehicles=vehicles)
 
+        try:
+            status = clean_status(DEAL, request.form.get('status'), current=deal['status'])
+            document_status = clean_status(DOCUMENT, request.form.get('document_status'),
+                                           current=deal.get('document_status'))
+            status_note = _status_note(request.form)
+        except ValueError as exc:
+            flash(str(exc), 'error')
+            return render_template('dealer/deal_form.html', deal=deal, vehicles=vehicles)
+
         update_data = {
             'customer_name': request.form.get('customer_name'),
             'customer_phone': customer_phone,
@@ -1506,17 +1679,86 @@ def edit_deal(did_):
             'emi_amount': (float(request.form.get('emi_amount'))
                            if request.form.get('emi_amount') else deal.get('emi_amount')),
             'bank_name': request.form.get('bank_name') or deal.get('bank_name'),
-            'status': request.form.get('status'),
+            'status': status,
+            'document_status': document_status,
             'booking_amount': float(request.form.get('booking_amount')) if request.form.get('booking_amount') else 0,
             'notes': request.form.get('notes')
         }
 
-        deal_update(did_, update_data)
+        try:
+            deal_update(did_, update_data, changed_by=g.user, status_note=status_note)
+        except DealStatusConflict:
+            flash(_STATUS_CONFLICT, 'error')
+            return redirect(url_for('dealer.edit_deal', did_=did_))
         log_dealer_action(f'Updated deal ID:{did_} for {update_data.get("customer_name", "customer")}', 'Sales')
         flash('Deal updated successfully', 'success')
         return redirect(url_for('dealer.deals'))
 
     return render_template('dealer/deal_form.html', deal=deal, vehicles=vehicles)
+
+
+_STATUS_CONFLICT = ("This deal's Car Status was changed somewhere else at the same moment, "
+                    "so nothing was saved. Check the deal and try again.")
+
+
+def _status_note(form) -> str:
+    """The optional remark saved with a Car Status change. Raises ValueError when too long."""
+    note = (form.get('status_note') or '').strip()
+    if len(note) > MAX_NOTE_LENGTH:
+        raise ValueError(f'The status remark can be at most {MAX_NOTE_LENGTH} characters.')
+    return note
+
+
+def _own_deal(did_):
+    deal = deal_get(did_)
+    return deal if deal and deal['dealer_id'] == get_dealer_id() else None
+
+
+@dealer_bp.route('/deals/<int:did_>/status', methods=['POST'])
+@dealer_required
+@kyc_required
+def update_deal_status(did_):
+    """Car Status dropdown on Deals & Sales; every change joins the deal's trail."""
+    deal = _own_deal(did_)
+    if deal is None:
+        flash('Deal not found', 'error')
+        return redirect(url_for('dealer.deals'))
+    try:
+        new_status = clean_status(DEAL, request.form.get('status'), current=deal['status'])
+    except InvalidStatus as exc:
+        flash(str(exc), 'error')
+        return _redirect_back('dealer.deals')
+    if not same_status(DEAL, deal['status'], new_status):
+        try:
+            deal_update(did_, {'status': new_status}, changed_by=g.user)
+        except DealStatusConflict:
+            flash(_STATUS_CONFLICT, 'error')
+            return _redirect_back('dealer.deals')
+        log_dealer_action(f'Changed car status of deal ID:{did_} to {new_status}', 'Sales')
+        flash(f'Deal #{did_}: Car Status set to {status_label(DEAL, new_status)}', 'success')
+    return _redirect_back('dealer.deals')
+
+
+@dealer_bp.route('/deals/<int:did_>/document-status', methods=['POST'])
+@dealer_required
+@kyc_required
+def update_deal_document_status(did_):
+    """Document Status dropdown on Deals & Sales. The Car Status is left alone."""
+    deal = _own_deal(did_)
+    if deal is None:
+        flash('Deal not found', 'error')
+        return redirect(url_for('dealer.deals'))
+    try:
+        new_status = clean_status(DOCUMENT, request.form.get('document_status'),
+                                  current=deal['document_status'])
+    except InvalidStatus as exc:
+        flash(str(exc), 'error')
+        return _redirect_back('dealer.deals')
+    if not same_status(DOCUMENT, deal['document_status'], new_status):
+        deal_update(did_, {'document_status': new_status})
+        log_dealer_action(f'Changed document status of deal ID:{did_} to {new_status}', 'Sales')
+        flash(f'Deal #{did_}: Document Status set to {status_label(DOCUMENT, new_status)}', 'success')
+    return _redirect_back('dealer.deals')
 
 
 @dealer_bp.route('/deals/invoice/<int:did_>')
@@ -1556,172 +1798,30 @@ def finance():
                            recent_deals=recent_deals
                            )
 
-# ========== DOCUMENTS ==========
+# ========== DOCUMENT FILES ==========
+# Documents are added, edited and removed with their vehicle (Add / Edit
+# Vehicle); documents without a vehicle are under Inventory → Other Documents.
+# This route serves the files, to the owning dealer only.
 
 
-@dealer_bp.route('/documents')
+@dealer_bp.route('/documents/<int:docid>/file')
 @dealer_required
 @kyc_required
-def documents():
-    dealer_id = get_dealer_id()
-    # Own uploaded documents (dealer's Documents table)
-    docs = documents_get_by_dealer(dealer_id)
-    vehicles = vehicles_get_by_dealer(dealer_id, per_page=100)['items']
-    # CDS documents assigned to this dealer by admin
-    try:
-        from db import cds_dealer_active_docs
-        cds_docs = cds_dealer_active_docs(dealer_id)
-    except Exception:
-        cds_docs = []
-
-    return render_template('dealer/documents.html', documents=docs, vehicles=vehicles, cds_docs=cds_docs)
-
-
-@dealer_bp.route('/documents/upload', methods=['POST'])
-@dealer_required
-@kyc_required
-def upload_document():
-    dealer_id = get_dealer_id()
-
-    file = request.files.get('document')
-    if not file or not file.filename:
-        flash('Please select a file', 'error')
-        return redirect(url_for('dealer.documents'))
-
-    ext = file.filename.rsplit('.', 1)[-1].lower()
-    if ext not in ['pdf', 'jpg', 'jpeg', 'png']:
-        flash('Invalid file type. Allowed: PDF, JPG, PNG', 'error')
-        return redirect(url_for('dealer.documents'))
-
-    filename = f"{uuid.uuid4().hex}.{ext}"
-    file.save(os.path.join(current_app.config['UPLOAD_FOLDER'], filename))
-
-    doc_data = {
-        'dealer_id': dealer_id,
-        'vehicle_id': request.form.get('vehicle_id') or None,
-        'customer_name': request.form.get('customer_name'),
-        'doc_type': request.form.get('doc_type'),
-        'filename': filename,
-        'original_name': file.filename,
-        # Notes was removed from the form; the column stays for older records.
-        'notes': None
-    }
-
-    document_create(doc_data)
-
-    # ── Register in Centralized Document Storage ──────────────────────────────
-    try:
-        from db import cds_register
-        cds_register({
-            'dealer_id':     dealer_id,
-            'file_name':     filename,
-            'original_name': file.filename,
-            'file_path':     os.path.join('images', 'uploads', filename),
-            'module_name':   'Documents',
-            'document_type': request.form.get('doc_type', ''),
-            'uploaded_by':   dealer_id,
-            'performed_by':  f'dealer:{dealer_id}',
-            'user_role':     'Dealer',
-        })
-    except Exception:
-        pass  # Never break the main upload flow
-    # ─────────────────────────────────────────────────────────────────────────
-
-    flash('Document uploaded successfully', 'success')
-    log_dealer_action(f'Uploaded document: {file.filename}', 'Documents')
-    return redirect(url_for('dealer.documents'))
-
-
-@dealer_bp.route('/documents/edit/<int:docid>', methods=['POST'])
-@dealer_required
-@kyc_required
-def edit_document(docid):
+def document_file(docid):
     """
-    Update a document's type, owner or linked vehicle, and optionally swap the
-    file. Leaving the file input empty keeps the existing one — replacing it
-    writes the new file first and only deletes the old one once that succeeded,
-    so a failed upload never leaves the record pointing at nothing.
+    A document's file, for the dealer who owns it and nobody else. ?download=1
+    saves it instead of opening it. Private files never go through /static.
     """
-    dealer_id = get_dealer_id()
-    docs = documents_get_by_dealer(dealer_id)
-    doc = next((d for d in docs if d['id'] == docid), None)
-    if not doc:
-        flash('Document not found', 'error')
-        return redirect(url_for('dealer.documents'))
+    doc = next((d for d in documents_get_by_dealer(get_dealer_id()) if d['id'] == docid), None)
+    if doc is None:
+        abort(404)
+    response = send_from_directory(document_folder(doc['storage']), doc['filename'],
+                                   as_attachment=request.args.get('download') == '1',
+                                   download_name=doc['original_name'] or doc['filename'])
+    response.headers['Cache-Control'] = 'private, no-store'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    return response
 
-    from models import Document
-    record = Document.query.filter_by(id=docid, dealer_id=dealer_id).first()
-    if not record:
-        flash('Document not found', 'error')
-        return redirect(url_for('dealer.documents'))
-
-    doc_type = (request.form.get('doc_type') or '').strip()
-    if not doc_type:
-        flash('Document type is required', 'error')
-        return redirect(url_for('dealer.documents'))
-
-    record.doc_type = doc_type
-    record.customer_name = (request.form.get('customer_name') or '').strip()
-    record.vehicle_id = request.form.get('vehicle_id') or None
-
-    file = request.files.get('document')
-    old_filename = record.filename
-    replaced = False
-
-    if file and file.filename:
-        ext = file.filename.rsplit('.', 1)[-1].lower()
-        if ext not in ['pdf', 'jpg', 'jpeg', 'png']:
-            flash('Invalid file type. Allowed: PDF, JPG, PNG', 'error')
-            return redirect(url_for('dealer.documents'))
-        new_name = f"{uuid.uuid4().hex}.{ext}"
-        file.save(os.path.join(current_app.config['UPLOAD_FOLDER'], new_name))
-        record.filename = new_name
-        record.original_name = file.filename
-        replaced = True
-
-    try:
-        db.session.commit()
-    except Exception as exc:
-        db.session.rollback()
-        current_app.logger.warning('document edit failed: %s', exc)
-        flash('Could not save the changes', 'error')
-        return redirect(url_for('dealer.documents'))
-
-    # only now is the old file safe to remove
-    if replaced and old_filename:
-        old_path = os.path.join(current_app.config['UPLOAD_FOLDER'], old_filename)
-        if os.path.exists(old_path):
-            try:
-                os.remove(old_path)
-            except OSError:
-                pass
-
-    log_dealer_action(f'Edited document: {record.original_name or record.filename}', 'Documents')
-    flash('Document updated' + (' and file replaced' if replaced else ''), 'success')
-    return redirect(url_for('dealer.documents'))
-
-
-@dealer_bp.route('/documents/delete/<int:docid>', methods=['POST'])
-@dealer_required
-@kyc_required
-def delete_document(docid):
-    dealer_id = get_dealer_id()
-    docs = documents_get_by_dealer(dealer_id)
-    doc = next((d for d in docs if d['id'] == docid), None)
-
-    if doc:
-        # Delete file
-        filepath = os.path.join(
-            current_app.config['UPLOAD_FOLDER'], doc['filename'])
-        if os.path.exists(filepath):
-            os.remove(filepath)
-        document_delete(docid)
-        log_dealer_action(f'Deleted document: {doc.get("original_name", doc.get("filename"))}', 'Documents')
-        flash('Document deleted successfully', 'success')
-    else:
-        flash('Document not found', 'error')
-
-    return redirect(url_for('dealer.documents'))
 
 # ========== REPORTS ==========
 
@@ -1773,35 +1873,16 @@ def reports():
                            period_range=describe(period, start, end)
                            )
 
-# ========== INQUIRIES ==========
+# ========== INQUIRIES (now CRM / Leads) ==========
 
 
 @dealer_bp.route('/inquiries')
-@dealer_required
-@kyc_required
-def inquiries():
-    dealer_id = get_dealer_id()
-    inquiries_list = inquiries_get_by_dealer(dealer_id)
-
-    return render_template('dealer/inquiries.html', inquiries=inquiries_list)
-
-
 @dealer_bp.route('/inquiries/respond/<int:iid>', methods=['POST'])
 @dealer_required
-@kyc_required
-def respond_inquiry(iid):
-    dealer_id = get_dealer_id()
-    inquiries_list = inquiries_get_by_dealer(dealer_id)
-    inquiry = next((i for i in inquiries_list if i['id'] == iid), None)
-
-    if inquiry:
-        inquiry_update_status(iid, 'responded')
-        log_dealer_action(f'Responded to inquiry #{iid}', 'Inquiries')
-        flash('Inquiry marked as responded', 'success')
-    else:
-        flash('Inquiry not found', 'error')
-
-    return redirect(url_for('dealer.inquiries'))
+def inquiries(iid=None):
+    """Old Inquiries URLs: customer inquiries are saved as leads now."""
+    flash('Customer inquiries now arrive as leads in CRM / Leads.', 'info')
+    return redirect(url_for('dealer.leads'))
 
 # ========== SUBSCRIPTION ==========
 
