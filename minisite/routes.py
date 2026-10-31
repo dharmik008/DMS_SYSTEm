@@ -23,9 +23,10 @@ from flask import (
     Blueprint, render_template, request, redirect,
     url_for, flash, jsonify, current_app, g, session
 )
-from models import db, User, Vehicle, VehicleImage, Inquiry, Lead, Deal
+from models import db, User, Vehicle, VehicleImage, Lead, Deal
 from sqlalchemy import or_, func
 from subscription_features import feature_required, feature_allowed
+from utils.inquiry_leads import SOURCE_WEBSITE, InquiryError, create_lead_from_inquiry
 
 minisite_bp = Blueprint('minisite', __name__, template_folder='../templates/minisite')
 
@@ -395,19 +396,15 @@ def contact(dealer_name, website_name):
         return render_template('minisite/404.html'), 404
 
     if request.method == 'POST':
-        inq = Inquiry(
-            dealer_id=dealer.id,
-            vehicle_id=None,
-            name=request.form.get('name', ''),
-            email=request.form.get('email', ''),
-            phone=request.form.get('phone', ''),
-            message=request.form.get('message', ''),
-            inquiry_type='contact',
-            status='pending',
-        )
-        db.session.add(inq)
-        db.session.commit()
-        flash('Message sent! We will get back to you soon.', 'success')
+        try:
+            create_lead_from_inquiry(
+                dealer_id=dealer.id, source=SOURCE_WEBSITE, inquiry_type='contact',
+                name=request.form.get('name'), phone=request.form.get('phone'),
+                email=request.form.get('email'), message=request.form.get('message'))
+        except InquiryError as exc:
+            flash(str(exc), 'error')
+        else:
+            flash('Message sent! We will get back to you soon.', 'success')
         return redirect(url_for('minisite.contact', dealer_name=dealer_name, website_name=website_name))
 
     logo_ctx = _dealer_logo_ctx(dealer)
@@ -463,7 +460,6 @@ def dashboard(dealer_name, website_name):
     # ── Lead stats ────────────────────────────────────────────────────────────
     total_leads   = Lead.query.filter_by(dealer_id=dealer.id).count()
     new_leads     = Lead.query.filter_by(dealer_id=dealer.id, stage='new').count()
-    open_inquiries = Inquiry.query.filter_by(dealer_id=dealer.id, status='pending').count()
 
     # ── Deal stats ────────────────────────────────────────────────────────────
     total_deals    = Deal.query.filter_by(dealer_id=dealer.id).count()
@@ -487,13 +483,6 @@ def dashboard(dealer_name, website_name):
         Lead.query
         .filter_by(dealer_id=dealer.id)
         .order_by(Lead.created_at.desc())
-        .limit(5).all()
-    )
-
-    recent_inquiries = (
-        Inquiry.query
-        .filter_by(dealer_id=dealer.id)
-        .order_by(Inquiry.created_at.desc())
         .limit(5).all()
     )
 
@@ -537,7 +526,6 @@ def dashboard(dealer_name, website_name):
         # leads
         total_leads=total_leads,
         new_leads=new_leads,
-        open_inquiries=open_inquiries,
         # deals
         total_deals=total_deals,
         closed_deals=closed_deals,
@@ -545,7 +533,6 @@ def dashboard(dealer_name, website_name):
         # lists
         recent_vehicles=recent_vehicles_dicts,
         recent_leads=recent_leads,
-        recent_inquiries=recent_inquiries,
         fuel_breakdown=fuel_breakdown,
         price_bands=price_bands,
         **logo_ctx,
@@ -561,16 +548,12 @@ def submit_inquiry(dealer_name, website_name):
         return jsonify({'success': False, 'error': 'Dealer not found'}), 404
 
     vehicle_id = request.form.get('vehicle_id', type=int)
-    inq = Inquiry(
-        dealer_id=dealer.id,
-        vehicle_id=vehicle_id,
-        name=request.form.get('name', ''),
-        email=request.form.get('email', ''),
-        phone=request.form.get('phone', ''),
-        message=request.form.get('message', ''),
-        inquiry_type='vehicle' if vehicle_id else 'general',
-        status='pending',
-    )
-    db.session.add(inq)
-    db.session.commit()
+    try:
+        create_lead_from_inquiry(
+            dealer_id=dealer.id, vehicle_id=vehicle_id, source=SOURCE_WEBSITE,
+            inquiry_type='vehicle' if vehicle_id else 'general',
+            name=request.form.get('name'), phone=request.form.get('phone'),
+            email=request.form.get('email'), message=request.form.get('message'))
+    except InquiryError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), exc.status_code
     return jsonify({'success': True, 'message': 'Inquiry submitted!'})
