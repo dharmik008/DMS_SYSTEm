@@ -3,9 +3,10 @@ from functools import wraps
 
 from db import (
     vehicles_public, vehicles_featured, vehicles_latest, vehicles_makes_count,
-    vehicles_similar, vehicle_get, inquiry_create, user_get_by_email
+    vehicles_similar, vehicle_get, user_get_by_email
 )
 from models import db, User, VehicleImage
+from utils.inquiry_leads import SOURCE_MARKETPLACE, InquiryError, create_lead_from_inquiry
 
 user_bp = Blueprint('user', __name__)
 
@@ -159,19 +160,18 @@ def inquire(vid):
         flash('Name and phone are required', 'error')
         return redirect(url_for('user.car_detail', vid=vid))
 
-    inquiry_data = {
-        'vehicle_id': vid,
-        'dealer_id': vehicle['dealer_id'],
-        'name': name,
-        'phone': phone,
-        'email': email,
-        'message': message,
-        'inquiry_type': inquiry_type
-    }
-    
-    inquiry_create(inquiry_data)
-    _log_user_action(f'Sent inquiry for {vehicle_name}', 'Inquiries',
-                      description=f'Inquiry from "{name}" for vehicle #{vid} ({vehicle_name})')
+    try:
+        lead, created = create_lead_from_inquiry(
+            dealer_id=vehicle['dealer_id'], vehicle_id=vid, source=SOURCE_MARKETPLACE,
+            inquiry_type=inquiry_type, name=name, phone=phone, email=email, message=message)
+    except InquiryError as exc:
+        flash(str(exc), 'error')
+        return redirect(url_for('user.car_detail', vid=vid))
+
+    if created:  # a resent form returns the existing lead; log it only once
+        _log_user_action(f'Sent inquiry for {vehicle_name}', 'Leads',
+                         description=f'Inquiry from "{name}" for vehicle #{vid} ({vehicle_name}) '
+                                     f'saved as lead #{lead.id}')
     flash('Inquiry sent successfully! The dealer will contact you soon.', 'success')
     return redirect(url_for('user.car_detail', vid=vid))
 
