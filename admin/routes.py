@@ -265,7 +265,7 @@ def logout():
 @admin_bp.route('/')
 @admin_login_required
 def dashboard():
-    from models import User, Vehicle, Lead, Deal, Inquiry, AdminLog
+    from models import User, Vehicle, Lead, Deal, AdminLog
     total_dealers = User.query.filter_by(role='dealer').count()
     total_users = User.query.filter_by(role='user').count()
     total_vehicles = Vehicle.query.count()
@@ -273,7 +273,7 @@ def dashboard():
     sold_v = Vehicle.query.filter_by(status='sold').count()
     total_leads = Lead.query.count()
     total_deals = Deal.query.count()
-    total_inquiries = Inquiry.query.count()
+    total_inquiries = Lead.query.filter(Lead.inquiry_type.isnot(None)).count()  # inquiries are leads now
     paid_deals = Deal.query.filter_by(payment_mode='cash').all()
     monthly_revenue = sum(d.final_price or 0 for d in paid_deals)
     pending_vehicles = Vehicle.query.filter_by(
@@ -917,12 +917,11 @@ def add_user():
 @admin_bp.route('/users/<int:user_id>')
 @require_permission('users')
 def view_user(user_id):
-    from models import User, Lead, Inquiry
+    from models import User, Lead
     user = User.query.get_or_404(user_id)
-    inquiries = Inquiry.query.filter_by(dealer_id=user_id).all()
     leads = Lead.query.filter_by(dealer_id=user_id).all()
     return render_template('admin/view_user.html', user=user,
-                           inquiries=inquiries, leads=leads, page='users')
+                           leads=leads, page='users')
 
 
 @admin_bp.route('/users/<int:user_id>/edit', methods=['GET', 'POST'])
@@ -1858,26 +1857,9 @@ def all_sales():
 @admin_bp.route('/inquiries')
 @require_permission('leads')
 def all_inquiries():
-    from models import Inquiry, Vehicle, User
-    inquiries_raw = Inquiry.query.order_by(Inquiry.created_at.desc()).all()
-    inquiries = []
-    for inq in inquiries_raw:
-        vehicle = Vehicle.query.get(inq.vehicle_id) if inq.vehicle_id else None
-        dealer  = User.query.get(vehicle.dealer_id) if vehicle and vehicle.dealer_id else None
-        inquiries.append({
-            'id':           inq.id,
-            'name':         inq.name,
-            'phone':        inq.phone,
-            'email':        inq.email,
-            'message':      inq.message,
-            'inquiry_type': inq.inquiry_type,
-            'status':       inq.status,
-            'created_at':   inq.created_at,
-            'vehicle_name': f"{vehicle.year} {vehicle.make} {vehicle.model}" if vehicle else '—',
-            'dealer_name':  dealer.name if dealer else '—',
-            'dealer_company': dealer.company_name if dealer else '—',
-        })
-    return render_template('admin/inquiries.html', inquiries=inquiries, page='inquiries')
+    """Old Inquiries page: customer inquiries are saved as leads now."""
+    flash('Customer inquiries now arrive as leads and are listed here.', 'info')
+    return redirect(url_for('admin.all_leads'))
 
 
 # ─── Reports ──────────────────────────────────────────────────────────────────
