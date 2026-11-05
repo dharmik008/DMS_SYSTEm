@@ -1,0 +1,165 @@
+{% extends 'admin/base.html' %}
+{% block title %}Payments — Caryanams Admin{% endblock %}
+{% block page_title %}Payments{% endblock %}
+
+{% block content %}
+
+{# Two sources, deliberately merged: dealer_payments covers Free and Demo
+   activations that never reach a gateway, payment_orders covers Razorpay
+   attempts including abandoned ones. Either alone under-reports. #}
+
+<div class="stats-grid mb-24">
+  <div class="stat-card">
+    <div class="stat-value" style="font-size:18px">&#8377;{{ "{:,.0f}".format(collected) }}</div>
+    <div class="stat-label">Collected (settled only)</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" style="font-size:18px">&#8377;{{ "{:,.0f}".format(this_month) }}</div>
+    <div class="stat-label">This Month</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{ pending }}</div>
+    <div class="stat-label">Pending / Created</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" style="{% if failed %}color:#DC2626{% endif %}">{{ failed }}</div>
+    <div class="stat-label">Failed</div>
+  </div>
+</div>
+
+<div class="card mb-16">
+  <div class="card-body">
+    <form method="GET" style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end">
+      <div class="form-group" style="margin:0;min-width:180px;flex:1">
+        <label>Search</label>
+        <input type="text" name="search" value="{{ f_search }}"
+               placeholder="Dealer name, email or reference">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Source</label>
+        <select name="source">
+          {% for key, lbl in [('all','All'),('subscription','Subscription'),('gateway','Razorpay')] %}
+          <option value="{{ key }}" {% if f_source == key %}selected{% endif %}>{{ lbl }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Status</label>
+        <select name="status">
+          <option value="">All</option>
+          {% for s in statuses %}
+          <option value="{{ s }}" {% if f_status == s %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Method</label>
+        <select name="method">
+          <option value="">All</option>
+          {% for m in methods %}
+          <option value="{{ m }}" {% if f_method == m %}selected{% endif %}>{{ m }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Plan</label>
+        <select name="plan">
+          <option value="">All</option>
+          {% for p in plans %}
+          <option value="{{ p }}" {% if f_plan == p %}selected{% endif %}>{{ p|title }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary">Filter</button>
+      <a href="{{ url_for('admin.payments') }}" class="btn btn-outline">Reset</a>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <div class="card-title">All Payments</div>
+    <span style="font-size:12px;color:var(--text-secondary)">{{ rows|length }} record(s)</span>
+  </div>
+  <div class="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Dealer</th>
+          <th>Plan</th>
+          <th>Source</th>
+          <th>Method</th>
+          <th class="r">Amount</th>
+          <th>Status</th>
+          <th>Reference</th>
+          <th>Invoice</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td style="white-space:nowrap">
+            {{ r.when.strftime('%d %b %Y') if r.when else '—' }}
+            <div style="font-size:11px;color:var(--text-secondary)">
+              {{ r.when.strftime('%H:%M') if r.when else '' }}
+            </div>
+          </td>
+          <td>
+            <div style="font-weight:600">{{ r.dealer.name }}</div>
+            <div style="font-size:11px;color:var(--text-secondary)">{{ r.dealer.email }}</div>
+          </td>
+          <td>{{ r.plan|title }}</td>
+          <td>
+            <span style="font-size:11px;color:var(--text-secondary)">{{ r.source }}</span>
+            {% if r.also_gateway %}
+            <div style="font-size:10px;color:var(--text-muted)" title="Matched to a Razorpay order with the same payment id; counted once">
+              + gateway record
+            </div>
+            {% endif %}
+          </td>
+          <td>{{ r.method }}</td>
+          <td class="r" style="font-weight:600;white-space:nowrap">
+            &#8377;{{ "{:,.0f}".format(r.amount) }}
+          </td>
+          <td>
+            {% set st = (r.status or '')|lower %}
+            {% if st in ['paid','active','success','captured'] %}
+              {% set tone = '#1A8A4A' %}{% set bg = '#E8F5E9' %}
+            {% elif st == 'failed' %}
+              {% set tone = '#B01B1B' %}{% set bg = '#FEF2F2' %}
+            {% elif st in ['pending','created'] %}
+              {% set tone = '#9A4208' %}{% set bg = '#FFF1E6' %}
+            {% else %}
+              {% set tone = '#475569' %}{% set bg = '#F1F5F9' %}
+            {% endif %}
+            <span style="font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:999px;
+                         color:{{ tone }};background:{{ bg }}">{{ r.status }}</span>
+          </td>
+          <td style="font-family:monospace;font-size:11.5px">{{ r.reference }}</td>
+          <td>
+            {% if st in ['paid','active','success','captured','free trial'] %}
+            <a href="{{ url_for('admin.payment_invoice', source=r.source_key, record_id=r.id) }}"
+               class="btn btn-sm btn-outline" title="Tax invoice">
+              <i class="fas fa-file-invoice"></i>
+            </a>
+            {% else %}
+            <span style="font-size:11px;color:var(--text-muted)" title="Invoices are only issued for settled payments">&mdash;</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9">
+          <div class="empty-state">
+            <i class="fas fa-receipt"></i>
+            <h3>No payments found</h3>
+            <p>Nothing matches these filters yet.</p>
+          </div>
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}
