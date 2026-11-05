@@ -1,0 +1,39 @@
+{#
+  Status dropdowns and badges for the dealer pages. The options come from
+  utils/statuses.py, so every page offers the same choices in the same order.
+
+    {% import 'dealer/_status.html' as status_ui %}
+
+    <select name="status">{{ status_ui.options('vehicle', vehicle['status']) }}</select>
+    {{ status_ui.badge('deal', deal['status']) }}
+    {{ status_ui.inline('deal', url, 'status', deal['status'], 'Car Status', next=request.full_path) }}
+
+  inline() is a one-field form that saves as soon as a new value is picked;
+  `next` is the page to come back to (request is not visible inside macros).
+#}
+{% macro options(kind, current) -%}
+{%- set chosen = selected_status(kind, current) -%}
+{%- for opt in status_options(kind, current) %}
+<option value="{{ opt.value }}"{% if opt.value == chosen %} selected{% endif %}>{{ opt.label }}</option>
+{%- endfor %}
+{%- endmacro %}
+
+{% macro badge(kind, value, icon='', outline=False, prefix='') -%}
+<span class="badge badge-{{ status_tone(kind, value) }}{% if outline %} badge-outline{% endif %}">
+  {%- if icon %}<i class="fas {{ icon }}" aria-hidden="true"></i> {% endif %}
+  {%- if prefix %}<span class="badge-prefix">{{ prefix }}:</span> {% endif %}{{ status_label(kind, value) -}}
+</span>
+{%- endmacro %}
+
+{% macro inline(kind, action, field, current, title, next='', icon='', variant='') -%}
+<form method="POST" action="{{ action }}"
+      class="status-pill status-pill--{{ status_tone(kind, current) }}{% if variant %} status-pill--{{ variant }}{% endif %}">
+  {%- if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+  {%- if icon %}<i class="fas {{ icon }} status-pill-icon" aria-hidden="true"></i>{% endif %}
+  <select name="{{ field }}" aria-label="{{ title }}" title="{{ title }}" onchange="this.form.submit()">
+    {{- options(kind, current) }}
+  </select>
+  <i class="fas fa-chevron-down status-pill-caret" aria-hidden="true"></i>
+  <noscript><button type="submit" class="btn btn-sm btn-outline">Save</button></noscript>
+</form>
+{%- endmacro %}
