@@ -7,8 +7,10 @@ import os
 import io
 import uuid
 import base64
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone as _tz
+from pathlib import Path
 
 _IST = _tz(timedelta(hours=5, minutes=30))
 
@@ -23,6 +25,7 @@ from flask import (
     send_file, flash, redirect, url_for, current_app, g, session
 )
 from PIL import Image
+from werkzeug.datastructures import FileStorage
 
 from extensions import db
 
@@ -64,6 +67,10 @@ from .utils import (
     apply_60_percent_background_blur
 )
 from utils.image_utils import save_uploaded_image, is_allowed_image
+from .spin360 import (
+    ALLOWED_VIDEO_EXTENSIONS, DEFAULT_FRAME_COUNT, FRAME_COUNT_CHOICES,
+    SpinVideoError, extract_spin_frames, is_allowed_video,
+)
 
 background_bp = Blueprint('background', __name__,
                            template_folder='../templates/background')
@@ -121,7 +128,9 @@ def _custom_bg_folder():
 def background_removal():
     return render_template('background/remove.html',
                            backgrounds=BACKGROUNDS,
-                           swatches=SWATCHES)
+                           swatches=SWATCHES,
+                           spin_frame_counts=FRAME_COUNT_CHOICES,
+                           spin_default_frames=DEFAULT_FRAME_COUNT)
 
 
 # ─── Upload → No BG (with session grouping for 360°) ─────────────────────────
@@ -772,23 +781,96 @@ def download_image(image_id):
 @feature_required('studio')
 def car_360_view(image_id):
     car = StudioImage.query.get(image_id)
+    if car is None:
+        return jsonify({'error': 'Image not found'}), 404
     frames = StudioImage.query.filter_by(session_group=car.session_group)\
                  .order_by(StudioImage.frame_order.asc()).all() if car.session_group else [car]
     result = []
     for f in frames:
-        url = None
-        if f.processed_path and os.path.exists(f.processed_path):
-            url = '/static/processed/' + os.path.basename(f.processed_path)
-        elif f.nobg_path and os.path.exists(f.nobg_path):
-            url = '/static/images/uploads/' + os.path.basename(f.nobg_path)
-        elif f.original_path and os.path.exists(f.original_path):
-            url = '/static/images/uploads/' + os.path.basename(f.original_path)
+        url = (_static_url(f.processed_path)
+               or _static_url(f.nobg_path)
+               or _static_url(f.original_path))
         if url:
             result.append({'id': f.id, 'url': url, 'frame_order': f.frame_order,
                            'status': f.status, 'car_name': f.car_name})
     return jsonify({'frames': result, 'total_frames': len(result),
                     'session_group': car.session_group, 'car_name': car.car_name,
                     'is_multi_frame': len(result) > 1})
+
+
+def _static_url(path):
+    """Public URL of a file inside the app's static folder, or None if it can't be served."""
+    if not path or not os.path.isfile(path):
+        return None
+    static_root = Path(current_app.static_folder).resolve()
+    try:
+        relative = Path(path).resolve().relative_to(static_root)
+    except ValueError:
+        return None
+    return url_for('static', filename=relative.as_posix())
+
+
+@background_bp.route('/api/upload-360-video', methods=['POST'])
+@_studio_dealer_required
+@feature_required('studio')
+def upload_360_video():
+    """Split a walkaround video into frames that form one 360° spin set."""
+    video = request.files.get('video')
+    if video is None or not video.filename:
+        return jsonify({'error': 'No video received'}), 400
+    if not is_allowed_video(video.filename):
+        allowed = ', '.join(sorted(ext.lstrip('.').upper() for ext in ALLOWED_VIDEO_EXTENSIONS))
+        return jsonify({'error': f'Unsupported video type. Use {allowed}.'}), 400
+    try:
+        frame_count = int(request.form.get('frame_count', DEFAULT_FRAME_COUNT))
+    except ValueError:
+        frame_count = 0
+    if frame_count not in FRAME_COUNT_CHOICES:
+        choices = ', '.join(map(str, FRAME_COUNT_CHOICES))
+        return jsonify({'error': f'Frame count must be one of {choices}.'}), 400
+
+    session_group = str(uuid.uuid4())[:12]
+    car_name = Path(video.filename).stem
+    upload_folder = _upload_folder()
+    results, saved_paths = [], []
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        video_path = tmp_path / f'walkaround{Path(video.filename).suffix.lower()}'
+        video.save(video_path)
+        try:
+            raw_frames = extract_spin_frames(video_path, tmp_path, 'frame', frame_count)
+        except SpinVideoError as exc:
+            return jsonify({'error': str(exc)}), 422
+
+        try:
+            for order, raw_frame in enumerate(raw_frames):
+                uid = str(uuid.uuid4())[:12]
+                # Same pipeline as photo uploads (HD resize + logo) so spin
+                # frames look like every other Studio image.
+                with raw_frame.open('rb') as fh:
+                    fname = save_uploaded_image(FileStorage(fh, filename=raw_frame.name),
+                                                upload_folder, f'car_{uid}')
+                saved_paths.append(Path(upload_folder) / fname)
+                db.session.add(StudioImage(
+                    id=uid, filename=fname, car_name=car_name,
+                    original_path=str(saved_paths[-1]), nobg_path=None, status='uploaded',
+                    bg_removal_method='none', bg_removal_quality='standard',
+                    session_group=session_group, frame_order=order,
+                ))
+                results.append({
+                    'id': uid, 'filename': fname, 'car_name': car_name,
+                    'original_url': '/static/images/uploads/' + fname,
+                    'nobg_url': None, 'bg_removed': False, 'method': None,
+                    'session_group': session_group, 'view_angle': 'spin',
+                })
+            db.session.commit()
+        except Exception:
+            # Don't leave half a spin set behind; the error itself still propagates.
+            db.session.rollback()
+            for path in saved_paths:
+                path.unlink(missing_ok=True)
+            raise
+    return jsonify(results)
 
 
 # ─── Watermark Only ───────────────────────────────────────────────────────────
