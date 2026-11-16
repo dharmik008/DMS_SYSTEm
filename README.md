@@ -81,6 +81,7 @@ python run.py
 | `/studio/api/download/<id>` | Download processed image |
 | `/studio/api/gallery` | Gallery list (GET) |
 | `/studio/api/car-360/<id>` | 360° frame data (GET) |
+| `/studio/api/upload-360-video` | Walkaround video → 360° frame set (POST) |
 
 ---
 
