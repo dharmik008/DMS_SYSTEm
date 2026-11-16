@@ -1,8 +1,10 @@
 {% extends "dealer/base.html" %}
+{% import "background/_spin360.html" as spin360 %}
 {% block title %}Caryanams Studio — Background Removal{% endblock %}
 {% block page_title %}Caryanams Studio{% endblock %}
 
 {% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/studio_360.css') }}">
 <style>
 /* ── Studio Layout ─────────────────────────────────────────── */
 .studio-wrap          { display:grid; grid-template-columns:1fr 380px; gap:20px; height:calc(100vh - 140px); min-height:600px; }
@@ -153,9 +155,11 @@ input[type=range]     { width:100%; accent-color:var(--navy); }
         <div class="canvas-title"><i class="fas fa-image"></i> Preview Canvas</div>
         <div style="display:flex;gap:8px;align-items:center">
           <span id="statusBadge" class="badge badge-info" style="display:none">Processing…</span>
+          {{ spin360.mode_toggle() }}
           <button class="btn btn-sm btn-outline" onclick="document.getElementById('fileInput').click()">
             <i class="fas fa-upload"></i> Upload Images
           </button>
+          {{ spin360.video_button() }}
         </div>
       </div>
 
@@ -196,6 +200,8 @@ input[type=range]     { width:100%; accent-color:var(--navy); }
           </div>
         </div>
 
+        <!-- 360° spin stage (shown in 360° View mode) -->
+        {{ spin360.stage() }}
         <!-- Processing overlay -->
         <div class="proc-overlay" id="procOverlay">
           <div class="proc-spinner"></div>
@@ -245,13 +251,14 @@ input[type=range]     { width:100%; accent-color:var(--navy); }
       </div>
       <div class="panel-section-body">
         <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">
-          Assign each image's view. BG removal only applies to Front, Back, Left &amp; Right.
+          Assign each image's view. BG removal only applies to Front, Back, Left, Right &amp; 360° frames.
         </div>
         <select id="viewAngleSelect" class="view-select" onchange="setCurrentAngle(this.value)">
           <option value="front">🔵 Front View</option>
           <option value="back">🟢 Back View</option>
           <option value="left">🟡 Left Side</option>
           <option value="right">🟠 Right Side</option>
+          <option value="spin">🔄 360° Spin Frame</option>
           <option value="other">⚪ Other (Interior / Detail)</option>
         </select>
         <div style="margin-top:10px;display:grid;grid-template-columns:repeat(2,1fr);gap:6px" id="quickAngleBtns">
@@ -276,7 +283,7 @@ input[type=range]     { width:100%; accent-color:var(--navy); }
         <!-- Angle restriction note -->
         <div class="angle-restrict-note">
           <i class="fas fa-info-circle" style="color:var(--gold-accent)"></i>
-          Background removal applies to <strong>Front, Back, Left &amp; Right</strong> views only.
+          Background removal applies to <strong>Front, Back, Left, Right &amp; 360° spin</strong> views only.
         </div>
         <!-- Quality -->
         <div style="margin-bottom:10px">
@@ -408,6 +415,9 @@ input[type=range]     { width:100%; accent-color:var(--navy); }
       </div>
     </div>
 
+    <!-- 360° Spin View -->
+    {{ spin360.panel(spin_frame_counts, spin_default_frames) }}
+
     <!-- Output Settings -->
     <div class="panel-section">
       <div class="panel-section-header" onclick="toggleSection(this)">
@@ -522,24 +532,30 @@ async function handleFiles(fileList) {
 
   try {
     const data = await safeFetchJSON('/studio/api/upload', { method: 'POST', body: fd });
-    images    = data;
-    // Ensure view_angle is set (backend already sets front/back/left/right/other by order)
-    images.forEach((img, i) => {
-      if (!img.view_angle) {
-        const defaults = ['front','back','left','right'];
-        img.view_angle = defaults[i] || 'other';
-      }
-    });
-    activeIdx = 0;
-    renderThumbs();
-    selectImage(0);
-    document.getElementById('btnBatchProcess').disabled  = false;
-    document.getElementById('batchCount').textContent    = images.length;
+    showUploadedImages(data);
   } catch (e) {
     alert('Upload error: ' + e.message);
     console.error('[upload]', e);
   }
   hideOverlay();
+}
+
+// Replaces the working set with freshly uploaded images (photos or video frames).
+function showUploadedImages(data) {
+  images    = data;
+  // Ensure view_angle is set (backend already sets front/back/left/right/other by order)
+  images.forEach((img, i) => {
+    if (!img.view_angle) {
+      const defaults = ['front','back','left','right'];
+      img.view_angle = defaults[i] || 'other';
+    }
+  });
+  activeIdx = 0;
+  renderThumbs();
+  selectImage(0);
+  document.getElementById('btnBatchProcess').disabled  = false;
+  document.getElementById('batchCount').textContent    = images.length;
+  window.studio360.imagesChanged();
 }
 
 // ─── View Angle Management ────────────────────────────────────────────────────
@@ -568,8 +584,8 @@ function showAllAngles() {
 }
 
 // ─── Thumbnail Strip ──────────────────────────────────────────────────────────
-const VIEW_ANGLE_LABELS = { front: 'Front', back: 'Back', left: 'Left', right: 'Right', other: 'Other' };
-const VIEW_ANGLES_WITH_BG = new Set(['front', 'back', 'left', 'right']);
+const VIEW_ANGLE_LABELS = { front: 'Front', back: 'Back', left: 'Left', right: 'Right', spin: '360°', other: 'Other' };
+const VIEW_ANGLES_WITH_BG = new Set(['front', 'back', 'left', 'right', 'spin']);
 
 function renderThumbs() {
   const strip = document.getElementById('thumbStrip');
@@ -893,6 +909,7 @@ document.getElementById('btnClearAll').addEventListener('click', () => {
   document.getElementById('fileInput').value            = '';
   const badge = document.getElementById('viewAngleBadge');
   if (badge) badge.style.display = 'none';
+  window.studio360.imagesChanged();
 });
 
 // ─── Download + Gallery ───────────────────────────────────────────────────────
@@ -996,4 +1013,5 @@ function flashSuccess(msg) {
   setTimeout(() => div.remove(), 5000);
 }
 </script>
+{{ spin360.script() }}
 {% endblock %}
