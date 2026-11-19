@@ -303,6 +303,7 @@ function vLoginPhone(strict) {
   const el = document.getElementById('loginPhone');
   let d = (el.value || '').replace(/\D/g, '');
   if (d.length === 12 && d.startsWith('91')) d = d.slice(2);
+  else if (d.length === 13 && d.startsWith('091')) d = d.slice(3);
   else if (d.length === 11 && d.startsWith('0')) d = d.slice(1);
   if (!d) return strict ? _showErr('loginPhone','loginPhoneErr','Mobile number is required.') : false;
   if (d.length !== 10 || !/^[6-9]/.test(d)) {
