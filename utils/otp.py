@@ -11,6 +11,7 @@ Rules (change the constants below if needed):
 """
 import hashlib
 import hmac
+import ipaddress
 import secrets
 from datetime import timedelta
 
@@ -22,6 +23,10 @@ RESEND_AFTER = timedelta(seconds=30)
 MAX_PER_PHONE_PER_HOUR = 5
 MAX_PER_IP_PER_HOUR = 20
 LOGIN_ROLES = ('dealer', 'user')
+
+_TOO_MANY = 'Too many codes requested. Please try again in an hour.'
+_EXPIRED = 'This code has expired. Tap "Resend code" to get a new one.'
+_TOO_MANY_TRIES = 'Too many wrong tries. Tap "Resend code" to get a new one.'
 
 
 # ── Phone numbers ───────────────────────────────────────────────────────────
@@ -76,11 +81,23 @@ def _hash(phone10, purpose, code):
 
 
 def _client_ip():
+    """
+    Address used for the per-IP send limit.
+
+    X-Forwarded-For and similar headers are whatever the client sends unless a
+    proxy overwrites them, so a public remote_addr (no proxy, or proxies
+    configured with TRUSTED_PROXY_COUNT in app.py) is used as is. Headers are
+    only consulted when the connection comes from a private address, i.e. an
+    unconfigured local proxy, where remote_addr would lump everyone together.
+    """
+    from utils.ip_utils import get_real_ip
+    remote = request.remote_addr or ''
     try:
-        from utils.request_meta import get_request_meta
-        return (get_request_meta(request)[0] or '')[:64]
-    except Exception:
-        return (request.remote_addr or '')[:64]
+        if ipaddress.ip_address(remote).is_global:
+            return remote[:64]
+    except ValueError:
+        pass
+    return get_real_ip(request)[:64]
 
 
 def _now():
@@ -115,16 +132,26 @@ def issue_otp(phone10, purpose):
     sent_from_ip = LoginOTP.query.filter(LoginOTP.ip_address == ip, LoginOTP.created_at >= hour_ago).count() if ip else 0
     if sent_to_phone >= MAX_PER_PHONE_PER_HOUR or sent_from_ip >= MAX_PER_IP_PER_HOUR:
         db.session.commit()
-        return False, 'Too many codes requested. Please try again in an hour.', 0
-
-    # Only the newest code for this number and purpose stays valid.
-    LoginOTP.query.filter_by(phone=phone10, purpose=purpose, consumed=False) \
-        .update({'consumed': True}, synchronize_session=False)
+        return False, _TOO_MANY, 0
 
     code = f'{secrets.randbelow(10 ** 6):06d}'
     row = LoginOTP(phone=phone10, purpose=purpose, code_hash=_hash(phone10, purpose, code),
                    ip_address=ip, created_at=now, expires_at=now + CODE_TTL)
     db.session.add(row)
+    db.session.commit()
+
+    refusal = _refusal_from_parallel_requests(row, hour_ago)
+    if refusal:
+        row.consumed = True
+        db.session.commit()
+        return refusal
+
+    # Only the newest code for this number and purpose stays valid. Done after
+    # the parallel-request check so a request that lost it can't invalidate
+    # the code that is actually being sent.
+    LoginOTP.query.filter(LoginOTP.phone == phone10, LoginOTP.purpose == purpose,
+                          LoginOTP.id < row.id, LoginOTP.consumed.is_(False)) \
+        .update({'consumed': True}, synchronize_session=False)
     db.session.commit()
 
     ok, _err = send_otp_sms(phone10, code)
@@ -133,6 +160,28 @@ def issue_otp(phone10, purpose):
         db.session.commit()
         return False, "We couldn't send the SMS right now. Please try again in a minute.", 0
     return True, f'We sent a 6-digit code to {mask_phone(phone10)}.', int(RESEND_AFTER.total_seconds())
+
+
+def _refusal_from_parallel_requests(row, hour_ago):
+    """
+    Re-apply the limits counting rows that other requests inserted at the same
+    moment, which the checks before the insert could not see. Without this a
+    burst of parallel requests would all pass and each send an SMS. The
+    earliest row (lowest id) wins. Returns issue_otp's refusal tuple, or None.
+    """
+    from models import LoginOTP
+    earlier = LoginOTP.query.filter(LoginOTP.id < row.id)
+    racing = earlier.filter(LoginOTP.phone == row.phone, LoginOTP.purpose == row.purpose,
+                            LoginOTP.created_at > row.created_at - RESEND_AFTER).count()
+    if racing:
+        wait = int(RESEND_AFTER.total_seconds())
+        return False, f'Please wait {wait} seconds before requesting another code.', wait
+    to_phone = earlier.filter(LoginOTP.phone == row.phone, LoginOTP.created_at >= hour_ago).count()
+    from_ip = (earlier.filter(LoginOTP.ip_address == row.ip_address, LoginOTP.created_at >= hour_ago).count()
+               if row.ip_address else 0)
+    if to_phone >= MAX_PER_PHONE_PER_HOUR or from_ip >= MAX_PER_IP_PER_HOUR:
+        return False, _TOO_MANY, 0
+    return None
 
 
 def verify_otp(phone10, purpose, code):
@@ -147,20 +196,30 @@ def verify_otp(phone10, purpose, code):
     row = (LoginOTP.query.filter_by(phone=phone10, purpose=purpose, consumed=False)
            .order_by(LoginOTP.created_at.desc()).first())
     if not row or row.expires_at < _now():
-        return False, 'This code has expired. Tap "Resend code" to get a new one.'
-    if row.attempts >= MAX_ATTEMPTS:
-        return False, 'Too many wrong tries. Tap "Resend code" to get a new one.'
+        return False, _EXPIRED
+    row_id, code_hash = row.id, row.code_hash
 
-    if hmac.compare_digest(row.code_hash, _hash(phone10, purpose, code)):
-        row.consumed = True
-        db.session.commit()
-        return True, None
-
-    row.attempts += 1
-    left = MAX_ATTEMPTS - row.attempts
+    # Count the attempt before comparing, in a single conditional UPDATE.
+    # Reading attempts and writing it back separately would let parallel
+    # requests all see "4 tries used" and each get a free guess.
+    claimed = (LoginOTP.query
+               .filter(LoginOTP.id == row_id, LoginOTP.consumed.is_(False),
+                       LoginOTP.attempts < MAX_ATTEMPTS)
+               .update({LoginOTP.attempts: LoginOTP.attempts + 1}, synchronize_session=False))
     db.session.commit()
+    if not claimed:
+        return False, _TOO_MANY_TRIES
+
+    if hmac.compare_digest(code_hash, _hash(phone10, purpose, code)):
+        # Conditional again, so two parallel correct submissions can't both succeed.
+        used = (LoginOTP.query.filter(LoginOTP.id == row_id, LoginOTP.consumed.is_(False))
+                .update({LoginOTP.consumed: True}, synchronize_session=False))
+        db.session.commit()
+        return (True, None) if used else (False, _EXPIRED)
+
+    left = MAX_ATTEMPTS - db.session.get(LoginOTP, row_id).attempts
     if left <= 0:
-        return False, 'Too many wrong tries. Tap "Resend code" to get a new one.'
+        return False, _TOO_MANY_TRIES
     return False, f'That code is not correct. {left} {"try" if left == 1 else "tries"} left.'
 
 
