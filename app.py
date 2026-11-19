@@ -10,7 +10,51 @@ PostgreSQL Migration (v27):
 """
 
 from flask import Flask, session, g
+import logging
 import os
+import secrets
+from pathlib import Path
+
+log = logging.getLogger(__name__)
+
+# Keys that have shipped in this project's files. Anyone with a copy of the
+# code knows them, so they are never used to sign cookies.
+_PUBLISHED_SECRET_KEYS = {'Caryanams-secret-2025-xK9mP', 'change-me-to-a-long-random-string'}
+
+
+def _load_secret_key(instance_path: str) -> str:
+    """
+    SECRET_KEY from the environment, or a random key kept in instance/secret_key.
+
+    The key signs the dealer/user sign-in cookies and keys the OTP hashes, so a
+    known key would let anyone sign in as any account without a code.
+    """
+    key = os.environ.get('SECRET_KEY', '').strip()
+    if key and key not in _PUBLISHED_SECRET_KEYS:
+        return key
+    if key:
+        log.warning('SECRET_KEY in .env is a published default and is ignored; '
+                    'using instance/secret_key instead.')
+
+    path = Path(instance_path) / 'secret_key'
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f'secret_key.{os.getpid()}.tmp')
+        tmp.write_text(secrets.token_urlsafe(48), encoding='utf-8')
+        try:
+            tmp.chmod(0o600)
+            # link() fails if the file exists, so when several workers start at
+            # once they all end up reading the same key.
+            os.link(tmp, path)
+        except FileExistsError:
+            pass
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    key = path.read_text(encoding='utf-8').strip()
+    if not key:
+        raise RuntimeError(f'{path} is empty. Delete it to generate a new key, or set SECRET_KEY.')
+    return key
 
 
 def _pg_column_exists(conn, table_name, column_name):
@@ -44,7 +88,16 @@ def _pg_table_exists(conn, table_name):
 
 def create_app():
     app = Flask(__name__)
-    app.secret_key = 'Caryanams-secret-2025-xK9mP'
+    app.secret_key = _load_secret_key(app.instance_path)
+
+    # Behind a reverse proxy (Nginx, a load balancer, Cloudflare), set
+    # TRUSTED_PROXY_COUNT to the number of proxies in front of the app so
+    # request.remote_addr is the real client and HTTPS is detected. The OTP
+    # per-IP limit relies on this; client-sent X-Forwarded-For alone is not trusted.
+    proxy_count = int(os.environ.get('TRUSTED_PROXY_COUNT') or 0)
+    if proxy_count > 0:
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=proxy_count, x_proto=proxy_count)
     app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(__file__), 'static', 'images', 'uploads')
     app.config['KYC_UPLOAD_FOLDER']     = os.path.join(os.path.dirname(__file__), 'static', 'uploads', 'dealers')
     app.config['VEHICLE_UPLOAD_FOLDER'] = os.path.join(os.path.dirname(__file__), 'static', 'uploads', 'vehicles')
