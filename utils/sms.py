@@ -19,6 +19,8 @@ import os
 
 import requests
 
+from utils.otp import CODE_TTL
+
 log = logging.getLogger(__name__)
 TIMEOUT = 10  # seconds
 
@@ -32,7 +34,8 @@ def is_test_mode():
 
 
 def _message(code):
-    return f'{code} is your Caryanams login code. It expires in 5 minutes. Do not share it with anyone.'
+    minutes = int(CODE_TTL.total_seconds() // 60)
+    return f'{code} is your Caryanams login code. It expires in {minutes} minutes. Do not share it with anyone.'
 
 
 def _console(phone10, code):
@@ -58,14 +61,22 @@ def _fast2sms(phone10, code):
 
 
 def _msg91(phone10, code):
-    key = os.environ.get('MSG91_AUTH_KEY', '')
-    template = os.environ.get('MSG91_TEMPLATE_ID', '')
+    key = os.environ.get('MSG91_AUTH_KEY', '').strip()
+    template = os.environ.get('MSG91_TEMPLATE_ID', '').strip()
     if not key or not template:
         return False, 'MSG91_AUTH_KEY and MSG91_TEMPLATE_ID must both be set'
     r = requests.post(
         'https://control.msg91.com/api/v5/otp',
         headers={'authkey': key, 'Content-Type': 'application/json'},
-        params={'template_id': template, 'mobile': '91' + phone10, 'otp': code},
+        params={
+            'template_id': template,
+            'mobile': '91' + phone10,
+            'otp': code,
+            'otp_expiry': int(CODE_TTL.total_seconds() // 60),
+            # Without this MSG91 answers "success" once the request is queued,
+            # so a failed delivery would still show "We sent a code".
+            'realTimeResponse': 1,
+        },
         json={},
         timeout=TIMEOUT,
     )
