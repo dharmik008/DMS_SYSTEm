@@ -67,7 +67,7 @@
 
       {% if otp_step == 'phone' %}
       <form method="POST" action="{{ url_for('auth.dealer_login', website_name=website_name) }}" novalidate
-            onsubmit="var d=(this.phone.value||'').replace(/\D/g,'');if(d.length===12&&d.indexOf('91')===0)d=d.slice(2);if(d.length===11&&d[0]==='0')d=d.slice(1);if(!/^[6-9]\d{9}$/.test(d)){document.getElementById('dlPhoneErr').style.display='block';this.phone.focus();return false;}">
+            onsubmit="var d=(this.phone.value||'').replace(/\D/g,'');if(d.length===12&&d.indexOf('91')===0)d=d.slice(2);else if(d.length===13&&d.indexOf('091')===0)d=d.slice(3);else if(d.length===11&&d[0]==='0')d=d.slice(1);if(!/^[6-9]\d{9}$/.test(d)){document.getElementById('dlPhoneErr').style.display='block';this.phone.focus();return false;}">
         <input type="hidden" name="action" value="send">
         <div class="form-group">
           <label class="form-label" for="dlPhone">Mobile Number</label>
