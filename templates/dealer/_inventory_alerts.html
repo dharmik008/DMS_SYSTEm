@@ -1,0 +1,309 @@
+{# ===========================================================================
+   _inventory_alerts.html — Inventory & dead-stock popup alerts
+
+   Pop-up ONLY. There is deliberately no alert page, no alert dashboard and
+   no notification inbox. Alerts arrive over whatever the dealer is already
+   looking at, and the page behind stays fully usable (no blocking scrim).
+
+   To add these popups to another dealer page, include this file at the end
+   of its {% block content %}. Nothing else is needed — it fetches its own
+   data from dealer.inventory_alerts_api.
+   =========================================================================== #}
+
+<style>
+  /* ── tier palette ───────────────────────────────────────────────────── */
+  .ia-tier-green  { --ia-bar:#1A8A4A; --ia-ink:#14663A; --ia-tint:#E8F5E9; }
+  .ia-tier-blue   { --ia-bar:#2563EB; --ia-ink:#1D4ED8; --ia-tint:#EFF6FF; }
+  .ia-tier-yellow { --ia-bar:#EAB308; --ia-ink:#8A6200; --ia-tint:#FEF9E7; }
+  .ia-tier-orange { --ia-bar:#F97316; --ia-ink:#9A4208; --ia-tint:#FFF1E6; }
+  .ia-tier-red    { --ia-bar:#DC2626; --ia-ink:#B01B1B; --ia-tint:#FEF2F2; }
+  .ia-tier-maroon { --ia-bar:#8C1414; --ia-ink:#731010; --ia-tint:#FBE4E3; }
+
+  /* ── the stack ──────────────────────────────────────────────────────── */
+  #iaStack {
+    position: fixed;
+    top: 84px;
+    right: 20px;
+    z-index: 4000;
+    width: min(384px, calc(100vw - 32px));
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    pointer-events: none;          /* the page behind stays clickable */
+  }
+  #iaStack > * { pointer-events: auto; }
+
+  .ia-alert {
+    background: var(--white, #fff);
+    border: 1px solid var(--border, #E2E8F0);
+    border-left: 5px solid var(--ia-bar);
+    border-radius: var(--radius, 12px);
+    box-shadow: 0 18px 40px -12px rgba(15, 23, 42, .28),
+                0 2px 8px rgba(15, 23, 42, .08);
+    overflow: hidden;
+    font-family: var(--font-body, 'Inter', sans-serif);
+    animation: iaPop .26s cubic-bezier(.2, .9, .3, 1);
+  }
+  .ia-alert.ia-tier-maroon { border-color: #E9B9B6; }
+
+  @keyframes iaPop {
+    from { opacity: 0; transform: translate3d(14px, -6px, 0) scale(.985); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  .ia-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--ia-tint);
+    border-bottom: 1px solid rgba(0, 0, 0, .06);
+  }
+  .ia-head h4 {
+    margin: 0;
+    font-family: var(--font-heading, 'Poppins', sans-serif);
+    font-size: 12.5px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    color: var(--ia-ink);
+    text-transform: uppercase;
+  }
+  .ia-x {
+    margin-left: auto;
+    border: 0;
+    background: transparent;
+    color: var(--ia-ink);
+    opacity: .6;
+    font-size: 18px;
+    line-height: 1;
+    padding: 2px 5px;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+  .ia-x:hover { opacity: 1; background: rgba(0, 0, 0, .06); }
+
+  .ia-body { padding: 11px 13px 12px; }
+  .ia-who {
+    margin: 0 0 5px;
+    font-family: var(--font-heading, 'Poppins', sans-serif);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary, #1E293B);
+  }
+  .ia-body p {
+    margin: 0 0 4px;
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--text-secondary, #475569);
+  }
+  .ia-body p strong { color: var(--text-primary, #1E293B); font-weight: 600; }
+
+  .ia-rows {
+    margin: 10px 0 0;
+    padding: 9px 11px;
+    border-radius: 8px;
+    background: var(--bg, #F8F9FC);
+    border: 1px solid var(--border, #E2E8F0);
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 3px 10px;
+    font-size: 12.5px;
+  }
+  .ia-rows dt { margin: 0; color: var(--text-secondary, #475569); }
+  .ia-rows dd {
+    margin: 0;
+    text-align: right;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary, #1E293B);
+  }
+  .ia-rows dd.ia-hot { color: var(--ia-ink); }
+
+  .ia-foot { display: flex; gap: 7px; padding: 0 13px 12px; }
+  .ia-btn {
+    flex: 1;
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border, #E2E8F0);
+    background: var(--white, #fff);
+    color: var(--text-primary, #1E293B);
+    font-size: 13px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    text-align: center;
+    text-decoration: none;
+  }
+  .ia-btn:hover { background: var(--bg, #F8F9FC); }
+  .ia-btn.ia-primary {
+    background: var(--ia-bar);
+    border-color: var(--ia-bar);
+    color: #fff;
+    font-weight: 600;
+  }
+  .ia-tier-yellow .ia-btn.ia-primary { color: #3D2B00; }
+  .ia-btn.ia-primary:hover { filter: brightness(.94); }
+
+  .ia-more {
+    align-self: flex-end;
+    font-size: 12px;
+    font-family: inherit;
+    color: var(--text-secondary, #475569);
+    background: var(--white, #fff);
+    border: 1px solid var(--border, #E2E8F0);
+    border-radius: 999px;
+    padding: 5px 12px;
+    cursor: pointer;
+    box-shadow: 0 6px 18px -6px rgba(15, 23, 42, .25);
+  }
+
+  @media (max-width: 640px) {
+    #iaStack {
+      top: auto;
+      bottom: 14px;
+      left: 12px;
+      right: 12px;
+      width: auto;
+      flex-direction: column-reverse;
+    }
+    .ia-more { align-self: center; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ia-alert { animation-duration: .001ms; }
+  }
+</style>
+
+<div id="iaStack" role="region" aria-live="polite" aria-label="Inventory alerts"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var ENDPOINT      = "{{ url_for('dealer.inventory_alerts_api') }}";
+  var INVENTORY_URL = "{{ url_for('dealer.inventory') }}";
+  var DEALER_NAME   = {{ (current_user.get('name') if current_user else 'Your dealership') | tojson }};
+  var MAX_VISIBLE   = 3;
+
+  var stack = document.getElementById('iaStack');
+  var queue = [];
+  var seq   = 0;
+
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+
+  function targetUrl(alert) {
+    if (alert.aging_filter) {
+      return INVENTORY_URL + '?aging=' + encodeURIComponent(alert.aging_filter);
+    }
+    return INVENTORY_URL + '?status=available';
+  }
+
+  function build(alert) {
+    var card = document.createElement('div');
+    card.className = 'ia-alert ia-tier-' + alert.tier;
+    card.setAttribute('role', 'alertdialog');
+    card.setAttribute('aria-label', alert.title + ' for ' + DEALER_NAME);
+
+    var rows = '';
+    (alert.rows || []).forEach(function (r) {
+      rows += '<dt>' + esc(r[0]) + '</dt>' +
+              '<dd class="' + (r[2] ? 'ia-hot' : '') + '">' + esc(r[1]) + '</dd>';
+    });
+
+    card.innerHTML =
+      '<div class="ia-head">' +
+        '<span aria-hidden="true">' + alert.glyph + '</span>' +
+        '<h4>' + esc(alert.title) + '</h4>' +
+        '<button type="button" class="ia-x" aria-label="Dismiss alert">&times;</button>' +
+      '</div>' +
+      '<div class="ia-body">' +
+        '<p class="ia-who">' + esc(DEALER_NAME) + '</p>' +
+        '<p>' + alert.lead + '</p>' +
+        (alert.sub ? '<p>' + alert.sub + '</p>' : '') +
+        '<dl class="ia-rows">' + rows + '</dl>' +
+      '</div>' +
+      '<div class="ia-foot">' +
+        '<a class="ia-btn ia-primary" href="' + esc(targetUrl(alert)) + '">' +
+          esc(alert.action_label) + '</a>' +
+        '<button type="button" class="ia-btn ia-dismiss">Dismiss</button>' +
+      '</div>';
+
+    card.querySelector('.ia-x').onclick = function () { dismiss(alert.uid); };
+    card.querySelector('.ia-dismiss').onclick = function () { dismiss(alert.uid); };
+    return card;
+  }
+
+  function render() {
+    stack.innerHTML = '';
+    queue.slice(0, MAX_VISIBLE).forEach(function (a) { stack.appendChild(build(a)); });
+
+    if (queue.length > MAX_VISIBLE) {
+      var more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'ia-more';
+      more.textContent = (queue.length - MAX_VISIBLE) + ' more · dismiss all';
+      more.onclick = dismissAll;
+      stack.appendChild(more);
+    } else if (queue.length > 1) {
+      var all = document.createElement('button');
+      all.type = 'button';
+      all.className = 'ia-more';
+      all.textContent = 'Dismiss all';
+      all.onclick = dismissAll;
+      stack.appendChild(all);
+    }
+  }
+
+  function dismiss(uid) {
+    queue = queue.filter(function (a) { return a.uid !== uid; });
+    render();
+  }
+  function dismissAll() { queue = []; render(); }
+
+  // Signatures of alerts already shown on THIS page load. A fresh page always
+  // starts empty, so opening Inventory always surfaces the current condition;
+  // coming back to the tab does not stack a second copy of the same thing.
+  var shown = {};
+
+  function signature(a) {
+    return [a.kind, a.threshold_id, (a.rows && a.rows[0] ? a.rows[0][1] : '')].join('|');
+  }
+
+  function poll() {
+    fetch(ENDPOINT, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data || !data.alerts || !data.alerts.length) { return; }
+        var fresh = data.alerts.filter(function (a) {
+          var sig = signature(a);
+          if (shown[sig]) { return false; }
+          shown[sig] = 1;
+          return true;
+        });
+        if (!fresh.length) { return; }
+        fresh.forEach(function (a) { a.uid = ++seq; queue.unshift(a); });
+        render();
+      })
+      .catch(function () { /* alerting must never break the page */ });
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && queue.length) { dismiss(queue[0].uid); }
+  });
+
+  // Fire on load, and again when the dealer comes back to the tab — a
+  // threshold crossed while they were away should not wait for a refresh.
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) { poll(); }
+  });
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', poll);
+  } else {
+    poll();
+  }
+})();
+</script>
