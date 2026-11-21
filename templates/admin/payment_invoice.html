@@ -1,0 +1,155 @@
+{% extends 'admin/base.html' %}
+{% block title %}Invoice {{ inv.number }} — Caryanams{% endblock %}
+{% block page_title %}Tax Invoice{% endblock %}
+
+{% block content %}
+<style>
+  /* The sheet is always a white, print-style document, so it carries its own
+     palette instead of inheriting the admin theme (dark mode text on a white
+     sheet was unreadable, and --navy / --gold are not defined in admin.css). */
+  .inv-sheet{--navy:#0F1B33;--gold:#D4A63A;--border:#E3E7EE;--text-secondary:#5B6475;
+    --bg:#F4F6FA;color:#111827;
+    background:#fff;max-width:820px;margin:0 auto;border:1px solid var(--border);
+    border-radius:12px;overflow:hidden}
+  .inv-head{background:var(--navy);color:#fff;padding:28px 32px;
+    display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
+  .inv-head h1{margin:0;font-family:'Syne',sans-serif;font-size:26px;font-weight:800;
+    color:var(--gold);letter-spacing:2px}
+  .inv-head .sub{color:rgba(255,255,255,.6);font-size:12.5px;margin-top:3px}
+  .inv-head .num{font-size:18px;font-weight:800;margin-top:3px}
+  .inv-parties{display:grid;grid-template-columns:1fr 1fr;gap:0;border-bottom:1px solid var(--border)}
+  .inv-party{padding:22px 32px}
+  .inv-party+.inv-party{border-left:1px solid var(--border)}
+  .inv-party h3{margin:0 0 9px;font-size:11px;letter-spacing:.09em;text-transform:uppercase;
+    color:var(--text-secondary);font-weight:700}
+  .inv-party .nm{font-weight:700;font-size:15px;margin-bottom:3px}
+  .inv-party div{font-size:13px;color:var(--text-secondary);line-height:1.6}
+  .inv-body{padding:0 32px 26px}
+  table.inv{width:100%;border-collapse:collapse;margin-top:22px}
+  table.inv th{text-align:left;font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--text-secondary);padding:9px 0;border-bottom:2px solid var(--border)}
+  table.inv td{padding:13px 0;border-bottom:1px solid var(--border);font-size:14px;vertical-align:top;
+    color:#111827;background:transparent}
+  table.inv tr:hover td{background:transparent}
+  table.inv td.r,table.inv th.r{text-align:right}
+  .inv-totals{margin-left:auto;width:min(320px,100%);margin-top:16px}
+  .inv-totals div{display:flex;justify-content:space-between;padding:6px 0;font-size:13.5px}
+  .inv-totals .grand{border-top:2px solid var(--navy);margin-top:8px;padding-top:11px;
+    font-size:17px;font-weight:800;color:var(--navy)}
+  .inv-words{margin-top:14px;padding:11px 14px;background:var(--bg,#f6f8fa);
+    border-radius:8px;font-size:12.5px;color:var(--text-secondary)}
+  .inv-foot{padding:18px 32px;border-top:1px solid var(--border);
+    font-size:11.5px;color:var(--text-secondary);line-height:1.7}
+  .inv-warn{margin:0 0 16px;padding:12px 15px;border-radius:10px;
+    background:#FFF1E6;border:1px solid #FBD5B5;color:#9A4208;font-size:13px;line-height:1.6}
+  .inv-actions{max-width:820px;margin:0 auto 16px;display:flex;gap:8px;flex-wrap:wrap}
+  @media print{
+    .inv-actions,.inv-warn,.sidebar,.topbar,.admin-sidebar,nav{display:none !important}
+    .inv-sheet{border:0;max-width:none}
+    body{background:#fff}
+  }
+</style>
+
+{% if inv.supplier_incomplete %}
+<div class="inv-warn" style="max-width:820px;margin-left:auto;margin-right:auto">
+  <strong>Not yet a valid tax invoice.</strong>
+  Your supplier details are still placeholders. Fill in the legal name, address,
+  GSTIN and state in <code>utils/billing_invoice.py</code> before issuing this to
+  a dealer, and confirm the GST treatment with your accountant.
+</div>
+{% endif %}
+
+<div class="inv-actions">
+  <a href="{{ url_for('admin.payments') }}" class="btn btn-outline btn-sm">&larr; Back to Payments</a>
+  <button type="button" class="btn btn-primary btn-sm" onclick="window.print()">
+    <i class="fas fa-print"></i> Print / Save as PDF
+  </button>
+</div>
+
+<div class="inv-sheet">
+  <div class="inv-head">
+    <div>
+      <h1>Caryanams</h1>
+      <div class="sub">Subscription Tax Invoice</div>
+    </div>
+    <div style="text-align:right">
+      <div style="font-size:11px;letter-spacing:.09em;text-transform:uppercase;
+                  color:rgba(255,255,255,.55)">Invoice No.</div>
+      <div class="num">{{ inv.number }}</div>
+      <div class="sub">Date: {{ inv.date.strftime('%d %B %Y') }}</div>
+      <div class="sub">FY {{ inv.fiscal_year }}</div>
+    </div>
+  </div>
+
+  <div class="inv-parties">
+    <div class="inv-party">
+      <h3>From</h3>
+      <div class="nm">{{ inv.supplier.legal_name }}</div>
+      {% for line in inv.supplier.address_lines %}<div>{{ line }}</div>{% endfor %}
+      {% if inv.supplier.gstin %}<div>GSTIN: {{ inv.supplier.gstin }}</div>{% endif %}
+      {% if inv.supplier.state %}<div>State: {{ inv.supplier.state }}{% if inv.supplier.state_code %} ({{ inv.supplier.state_code }}){% endif %}</div>{% endif %}
+      {% if inv.supplier.email %}<div>{{ inv.supplier.email }}</div>{% endif %}
+      {% if inv.supplier.phone %}<div>{{ inv.supplier.phone }}</div>{% endif %}
+    </div>
+    <div class="inv-party">
+      <h3>Billed To</h3>
+      <div class="nm">{{ inv.dealer.company_name or inv.dealer.name }}</div>
+      {% if inv.dealer.company_name %}<div>{{ inv.dealer.name }}</div>{% endif %}
+      {% if inv.dealer.address %}<div>{{ inv.dealer.address }}</div>{% endif %}
+      {% if inv.dealer.city %}<div>{{ inv.dealer.city }}</div>{% endif %}
+      <div>{{ inv.dealer.email }}</div>
+      {% if inv.dealer.phone %}<div>{{ inv.dealer.phone }}</div>{% endif %}
+      {% if inv.dealer.display_id %}<div>Dealer ID: {{ inv.dealer.display_id }}</div>{% endif %}
+    </div>
+  </div>
+
+  <div class="inv-body">
+    <table class="inv">
+      <thead>
+        <tr>
+          <th>Description</th>
+          <th>SAC</th>
+          <th class="r">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            {{ inv.description }}
+            <div style="font-size:12px;color:var(--text-secondary);margin-top:3px">
+              Paid via {{ inv.method }}{% if inv.reference and inv.reference != '—' %}
+              &middot; Ref {{ inv.reference }}{% endif %}
+            </div>
+          </td>
+          <td style="font-family:monospace;font-size:12.5px">{{ inv.sac_code }}</td>
+          <td class="r">&#8377;{{ "{:,.2f}".format(inv.base) }}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="inv-totals">
+      <div><span>Taxable value</span><span>&#8377;{{ "{:,.2f}".format(inv.base) }}</span></div>
+      {% for line in inv.tax_lines %}
+      <div><span>{{ line.label }}</span><span>&#8377;{{ "{:,.2f}".format(line.amount) }}</span></div>
+      {% endfor %}
+      <div class="grand"><span>Total</span><span>&#8377;{{ "{:,.2f}".format(inv.total) }}</span></div>
+    </div>
+
+    <div class="inv-words">
+      <strong>Amount in words:</strong> {{ inv.amount_words }}
+      {% if inv.gst_inclusive %}
+      <div style="margin-top:5px">The plan price is GST-inclusive; tax shown above is
+        contained within the amount charged.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="inv-foot">
+    Status: <strong>{{ inv.status }}</strong>.
+    This is a computer-generated invoice and does not require a signature.
+    {% if not inv.supplier.gstin %}
+    <div style="margin-top:6px;color:#9A4208">Supplier GSTIN not configured.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

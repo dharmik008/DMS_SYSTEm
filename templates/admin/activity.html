@@ -1,0 +1,737 @@
+{% extends 'admin/base.html' %}
+{% block title %}Activity Logs — Caryanams Admin{% endblock %}
+{% block page_title %}Activity Logs{% endblock %}
+
+{% block content %}
+
+{# ── Macro: module badge colour ──────────────────────────────────────────── #}
+{% macro module_badge(m) %}
+  {% set ml = m | lower %}
+  {% if 'dealer' in ml %}
+    <span class="badge badge-blue">{{ m }}</span>
+  {% elif 'user' in ml %}
+    <span class="badge badge-purple">{{ m }}</span>
+  {% elif 'vehicle' in ml %}
+    <span class="badge badge-yellow-soft">{{ m }}</span>
+  {% elif 'lead' in ml %}
+    <span class="badge badge-green">{{ m }}</span>
+  {% elif 'sale' in ml or 'deal' in ml %}
+    <span class="badge badge-orange">{{ m }}</span>
+  {% elif 'setting' in ml %}
+    <span class="badge badge-gray">{{ m }}</span>
+  {% elif 'auth' in ml %}
+    <span class="badge badge-dark">{{ m }}</span>
+  {% elif 'kyc' in ml or 'suadmin' in ml or 'subadmin' in ml %}
+    <span class="badge badge-purple">{{ m }}</span>
+  {% else %}
+    <span class="badge badge-gray">{{ m }}</span>
+  {% endif %}
+{% endmacro %}
+
+{# ── Macro: role badge ───────────────────────────────────────────────────── #}
+{% macro role_badge(r) %}
+  {% set rl = r | lower %}
+  {% if 'super' in rl %}
+    <span class="badge badge-role-super">{{ r }}</span>
+  {% elif 'sub' in rl %}
+    <span class="badge badge-role-sub">{{ r }}</span>
+  {% elif 'admin' in rl %}
+    <span class="badge badge-role-admin">{{ r }}</span>
+  {% elif 'dealer' in rl %}
+    <span class="badge badge-role-dealer">{{ r }}</span>
+  {% else %}
+    <span class="badge badge-gray">{{ r }}</span>
+  {% endif %}
+{% endmacro %}
+
+{# ── Macro: status badge ─────────────────────────────────────────────────── #}
+{% macro status_badge(s) %}
+  {% set sl = (s or 'success') | lower %}
+  {% if sl == 'success' %}
+    <span class="badge badge-green">{{ s or 'Success' }}</span>
+  {% elif sl == 'failed' %}
+    <span class="badge badge-red">{{ s }}</span>
+  {% elif sl == 'warning' %}
+    <span class="badge badge-orange">{{ s }}</span>
+  {% else %}
+    <span class="badge badge-gray">{{ s }}</span>
+  {% endif %}
+{% endmacro %}
+
+<!-- ── Page Header ───────────────────────────────────────────────────────── -->
+<div class="page-header" style="margin-bottom:20px;">
+  <div class="page-header-left">
+    <h1 style="font-family:var(--font-display);font-size:1.4rem;font-weight:800;color:var(--text-1);margin-bottom:4px;">
+      Activity Logs
+    </h1>
+    <p style="font-size:0.82rem;color:var(--text-3);">
+      Unified monitoring — all roles · real-time · {{ total }} total events
+    </p>
+  </div>
+  <div style="display:flex;gap:10px;align-items:center;">
+    <div class="live-indicator">
+      <span class="live-dot"></span>
+      <span>Live</span>
+    </div>
+    <a href="{{ url_for('admin.activity_export', role=role_filter, module=module_filter, date=date_filter, search=search) }}"
+       class="btn btn-outline btn-sm" style="gap:6px;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+      </svg>
+      Export CSV
+    </a>
+  </div>
+</div>
+
+<!-- ── Stats Row ─────────────────────────────────────────────────────────── -->
+<div class="al-stats-row">
+  <div class="al-stat">
+    <div class="al-stat-icon" style="background:rgba(99,102,241,0.12);color:var(--accent);">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+    </div>
+    <div>
+      <div class="al-stat-val">{{ total }}</div>
+      <div class="al-stat-lbl">Total Events</div>
+    </div>
+  </div>
+  <div class="al-stat">
+    <div class="al-stat-icon" style="background:rgba(170,119,255,0.12);color:var(--purple);">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+    </div>
+    <div>
+      <div class="al-stat-val">{{ total_pages }}</div>
+      <div class="al-stat-lbl">Pages</div>
+    </div>
+  </div>
+  <div class="al-stat">
+    <div class="al-stat-icon" style="background:rgba(68,153,255,0.12);color:var(--blue);">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+    </div>
+    <div>
+      <div class="al-stat-val">4</div>
+      <div class="al-stat-lbl">Roles Tracked</div>
+    </div>
+  </div>
+  <div class="al-stat">
+    <div class="al-stat-icon" style="background:rgba(46,232,154,0.12);color:var(--green);">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+    </div>
+    <div>
+      <div class="al-stat-val">{{ per_page }}</div>
+      <div class="al-stat-lbl">Per Page</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Filters Card ───────────────────────────────────────────────────────── -->
+<div class="card" style="margin-bottom:16px;padding:16px 20px;">
+  <form method="GET" action="{{ url_for('admin.activity') }}" id="filterForm">
+
+    <!-- Role Tab Pills -->
+    <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;">
+      {% set roles = [('', 'All Roles'), ('Super Admin', 'Super Admin'), ('Sub Admin', 'Sub Admin'), ('Admin', 'Admin'), ('Dealer', 'Dealer')] %}
+      {% for val, label in roles %}
+      <button type="submit" name="role" value="{{ val }}"
+              class="role-pill {% if role_filter == val %}active{% endif %}"
+              onclick="document.getElementById('roleHidden').value='{{ val }}'">
+        {% if val == '' %}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/></svg>
+        {% elif val == 'Super Admin' %}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        {% elif val == 'Sub Admin' %}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+        {% elif val == 'Admin' %}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        {% elif val == 'Dealer' %}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="1" y="3" width="15" height="13"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+        {% endif %}
+        {{ label }}
+      </button>
+      {% endfor %}
+      <input type="hidden" name="role" id="roleHidden" value="{{ role_filter }}">
+    </div>
+
+    <!-- Search + Filters Row -->
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+      <div style="position:relative;flex:1;min-width:200px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             style="position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--text-3);pointer-events:none;">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input type="text" name="search" value="{{ search }}" placeholder="Search user, action, IP…"
+               class="filter-input" style="padding-left:34px;width:100%;">
+      </div>
+
+      <select name="module" class="filter-select" onchange="this.form.submit()">
+        <option value="">All Modules</option>
+        {% for mod in all_modules %}
+        <option value="{{ mod }}" {% if module_filter == mod %}selected{% endif %}>{{ mod }}</option>
+        {% endfor %}
+      </select>
+
+      <input type="date" name="date" value="{{ date_filter }}" class="filter-input"
+             style="min-width:150px;" onchange="this.form.submit()">
+
+      <button type="submit" class="btn btn-primary btn-sm">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        Filter
+      </button>
+
+      {% if role_filter or module_filter or date_filter or search %}
+      <a href="{{ url_for('admin.activity') }}" class="btn btn-outline btn-sm">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+        Clear
+      </a>
+      {% endif %}
+    </div>
+  </form>
+</div>
+
+<!-- ── Main Table Card ────────────────────────────────────────────────────── -->
+<div class="card">
+  <div class="card-header" style="padding-bottom:0;border-bottom:none;">
+    <span class="card-title" style="font-size:0.9rem;">
+      Showing
+      <strong style="color:var(--text-1);">
+        {{ ((page_num - 1) * per_page + 1) if total > 0 else 0 }}–{{ [page_num * per_page, total] | min }}
+      </strong>
+      of <strong style="color:var(--text-1);">{{ total }}</strong> events
+      {% if role_filter %}&nbsp;· Role: <span class="badge badge-gray" style="font-size:0.7rem;">{{ role_filter }}</span>{% endif %}
+      {% if module_filter %}&nbsp;· Module: <span class="badge badge-gray" style="font-size:0.7rem;">{{ module_filter }}</span>{% endif %}
+      {% if search %}&nbsp;· Search: <span class="badge badge-gray" style="font-size:0.7rem;">"{{ search }}"</span>{% endif %}
+    </span>
+    <span style="font-size:0.78rem;color:var(--text-3);">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      Latest first
+    </span>
+  </div>
+
+  <div class="table-wrapper" style="overflow-x:auto;width:100%;max-width:100%;">
+    <table class="table" id="activityTable" style="width:100%;table-layout:auto;">
+      <thead>
+        <tr>
+          <th style="width:32px;">#</th>
+          <th style="width:110px;">User Role</th>
+          <th style="width:120px;">User Name</th>
+          <th style="min-width:220px;max-width:360px;">Action</th>
+          <th style="width:130px;">Module</th>
+          <th style="width:120px;">Date &amp; Time</th>
+          <th style="width:110px;">IP Address</th>
+          <th style="width:120px;">Device</th>
+          <th style="width:80px;">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log in logs %}
+        <tr class="al-row" data-log-id="{{ log.id }}">
+          <td style="color:var(--text-3);font-size:0.75rem;">
+            {{ (page_num - 1) * per_page + loop.index }}
+          </td>
+          <td>{{ role_badge(log.user_role or 'Admin') }}</td>
+          <td>
+            <div style="display:flex;align-items:center;gap:9px;">
+              <div class="al-avatar al-avatar-{{ (log.user_role or 'Admin') | lower | replace(' ', '') }}">
+                {{ (log.admin_user or 'A')[0] | upper }}
+              </div>
+              <span style="font-weight:500;font-size:0.85rem;color:var(--text-1);">{{ log.admin_user }}</span>
+            </div>
+          </td>
+          <td style="max-width:360px;">
+            <div style="display:flex;align-items:flex-start;gap:8px;">
+              <div class="al-action-dot" style="margin-top:4px;flex-shrink:0;"></div>
+              <span style="font-size:0.85rem;color:var(--text-1);word-break:break-word;white-space:normal;">{{ log.action }}</span>
+            </div>
+          </td>
+          <td>{{ module_badge(log.module or 'System') }}</td>
+          <td>
+            <div style="font-size:0.8rem;color:var(--text-2);white-space:nowrap;">
+              {% if log.created_at %}
+                <span class="al-ts-date"
+                      data-utc="{{ log.created_at.strftime('%Y-%m-%dT%H:%M:%S') }}+05:30">
+                  {{ log.created_at.strftime('%d %b %Y') }}
+                </span>
+                <span class="al-ts-time"
+                      data-utc="{{ log.created_at.strftime('%Y-%m-%dT%H:%M:%S') }}+05:30"
+                      style="display:block;font-size:0.72rem;color:var(--text-3);margin-top:1px;">
+                  {{ log.created_at.strftime('%I:%M %p') }}
+                </span>
+              {% else %}
+                —
+              {% endif %}
+            </div>
+          </td>
+          <td>
+            <code style="font-size:0.75rem;color:var(--text-2);background:var(--bg-base);padding:3px 8px;border-radius:5px;border:1px solid var(--border);">
+              {{ log.ip_address or '—' }}
+            </code>
+          </td>
+          <td>
+            <div style="font-size:0.78rem;color:var(--text-2);white-space:nowrap;">
+              {{ log.device or '—' }}
+              {% if log.browser %}<span style="display:block;font-size:0.7rem;color:var(--text-3);">{{ log.browser }}</span>{% endif %}
+            </div>
+          </td>
+          <td>{{ status_badge(log.status or 'Success') }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="9" style="text-align:center;padding:60px 20px;">
+            <div class="empty-state" style="padding:0;">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin:0 auto 16px;display:block;opacity:0.25;color:var(--text-3);">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+              </svg>
+              <h3 style="font-family:var(--font-display);font-size:0.95rem;color:var(--text-2);margin-bottom:6px;">No activity found</h3>
+              <p style="font-size:0.8rem;color:var(--text-3);">
+                {% if role_filter or module_filter or date_filter or search %}
+                  Try adjusting your filters or <a href="{{ url_for('admin.activity') }}" style="color:var(--accent);">clear all</a>.
+                {% else %}
+                  Actions across all roles will appear here as they happen.
+                {% endif %}
+              </p>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ── Pagination ─────────────────────────────────────────────────────── -->
+  {% if total_pages > 1 %}
+  <div class="pagination" style="padding:16px 20px;">
+    <span class="page-info">
+      Page {{ page_num }} of {{ total_pages }} &nbsp;·&nbsp; {{ total }} records
+    </span>
+    <div class="page-btns">
+      {% if page_num > 1 %}
+      <a href="{{ url_for('admin.activity', page=1, role=role_filter, module=module_filter, date=date_filter, search=search) }}"
+         class="page-btn" title="First">«</a>
+      <a href="{{ url_for('admin.activity', page=page_num-1, role=role_filter, module=module_filter, date=date_filter, search=search) }}"
+         class="page-btn">‹</a>
+      {% endif %}
+
+      {% set start_p = [1, page_num - 2] | max %}
+      {% set end_p   = [total_pages, page_num + 2] | min %}
+      {% for p in range(start_p, end_p + 1) %}
+      <a href="{{ url_for('admin.activity', page=p, role=role_filter, module=module_filter, date=date_filter, search=search) }}"
+         class="page-btn {% if p == page_num %}active{% endif %}">{{ p }}</a>
+      {% endfor %}
+
+      {% if page_num < total_pages %}
+      <a href="{{ url_for('admin.activity', page=page_num+1, role=role_filter, module=module_filter, date=date_filter, search=search) }}"
+         class="page-btn">›</a>
+      <a href="{{ url_for('admin.activity', page=total_pages, role=role_filter, module=module_filter, date=date_filter, search=search) }}"
+         class="page-btn" title="Last">»</a>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<style>
+/* ── Activity-Log specific styles ──────────────────────────────────── */
+
+/* Live indicator */
+.live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--green);
+  background: rgba(46,232,154,0.10);
+  border: 1px solid rgba(46,232,154,0.20);
+  padding: 5px 12px;
+  border-radius: 99px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.live-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: pulse-dot 1.8s ease infinite;
+}
+@keyframes pulse-dot {
+  0%,100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.5; transform: scale(0.7); }
+}
+
+/* Stats row */
+.al-stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.al-stat {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+}
+.al-stat-icon {
+  width: 36px; height: 36px;
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.al-stat-val {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--text-1);
+  line-height: 1;
+  margin-bottom: 2px;
+}
+.al-stat-lbl { font-size: 0.72rem; color: var(--text-3); font-weight: 500; }
+
+/* Role pill tabs */
+.role-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 99px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-3);
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-family: var(--font-body);
+  cursor: pointer;
+  transition: all 0.18s;
+  letter-spacing: 0.2px;
+}
+.role-pill:hover {
+  color: var(--text-1);
+  border-color: var(--border-md);
+  background: var(--bg-hover);
+}
+.role-pill.active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Role-specific badges (no dot) */
+.badge-role-super {
+  background: rgba(170,119,255,0.12);
+  color: var(--purple);
+  font-size: 0.7rem;
+  padding: 3px 10px;
+  border-radius: 99px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.badge-role-super::before { content:''; width:5px;height:5px;border-radius:50%;background:currentColor; }
+.badge-role-sub {
+  background: rgba(68,153,255,0.12);
+  color: var(--blue);
+  font-size: 0.7rem; padding: 3px 10px; border-radius:99px; font-weight:700;
+  display:inline-flex; align-items:center; gap:5px;
+}
+.badge-role-sub::before { content:''; width:5px;height:5px;border-radius:50%;background:currentColor; }
+.badge-role-admin {
+  background: rgba(99,102,241,0.12);
+  color: var(--accent);
+  font-size: 0.7rem; padding: 3px 10px; border-radius:99px; font-weight:700;
+  display:inline-flex; align-items:center; gap:5px;
+}
+.badge-role-admin::before { content:''; width:5px;height:5px;border-radius:50%;background:currentColor; }
+.badge-role-dealer {
+  background: rgba(255,153,68,0.12);
+  color: var(--orange);
+  font-size: 0.7rem; padding: 3px 10px; border-radius:99px; font-weight:700;
+  display:inline-flex; align-items:center; gap:5px;
+}
+.badge-role-dealer::before { content:''; width:5px;height:5px;border-radius:50%;background:currentColor; }
+
+/* Yellow/vehicles badge (not in the base CSS) */
+.badge-yellow-soft {
+  background: rgba(255,204,51,0.12);
+  color: #FFCC33;
+  font-size: 0.72rem; font-weight: 600; padding: 3px 10px; border-radius:99px;
+  display:inline-flex; align-items:center; gap:5px;
+}
+.badge-yellow-soft::before { content:''; width:5px;height:5px;border-radius:50%;background:currentColor; }
+
+/* Dark / Auth badge */
+.badge-dark {
+  background: rgba(255,255,255,0.06);
+  color: var(--text-2);
+  font-size: 0.72rem; font-weight: 600; padding: 3px 10px; border-radius:99px;
+  display:inline-flex; align-items:center; gap:5px;
+}
+.badge-dark::before { content:''; width:5px;height:5px;border-radius:50%;background:currentColor; }
+
+/* Avatar chips */
+.al-avatar {
+  width: 28px; height: 28px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.68rem; font-weight: 800; flex-shrink: 0;
+}
+.al-avatar-superadmin { background: rgba(170,119,255,0.18); color: var(--purple); }
+.al-avatar-subadmin   { background: rgba(68,153,255,0.18);  color: var(--blue); }
+.al-avatar-admin      { background: rgba(99,102,241,0.18);  color: var(--accent); }
+.al-avatar-dealer     { background: rgba(255,153,68,0.18);  color: var(--orange); }
+
+/* Action dot */
+.al-action-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); flex-shrink: 0;
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+/* Row hover */
+.al-row { transition: background 0.12s; }
+.al-row:hover { background: var(--bg-hover); }
+.al-row:hover .al-action-dot { background: var(--green); box-shadow: 0 0 0 3px rgba(46,232,154,0.15); }
+@keyframes al-fadein { from { opacity:0; background:rgba(99,102,241,0.08); } to { opacity:1; background:transparent; } }
+
+/* Page-header flex */
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+/* Fix table container overflow */
+.table-wrapper {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.table-wrapper table {
+  min-width: 700px;
+}
+
+/* Content section full width */
+.al-content-card {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* Responsive stats */
+@media (max-width: 900px) {
+  .al-stats-row { grid-template-columns: repeat(2,1fr); }
+}
+@media (max-width: 520px) {
+  .al-stats-row { grid-template-columns: 1fr 1fr; }
+  .page-header { flex-direction: column; }
+}
+</style>
+
+<script>
+// ── Local-timezone timestamp rendering ─────────────────────────────────────
+// Server stores naive IST (Asia/Kolkata, UTC+5:30) timestamps. data-utc
+// carries the correct +05:30 offset (not UTC) so Date parsing is accurate.
+// We then render in the browser's own local timezone so every viewer sees
+// their own local date/time regardless of where the server is located.
+(function () {
+  var userTZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  var dateFmt = new Intl.DateTimeFormat(undefined, {
+    day: '2-digit', month: 'short', year: 'numeric',
+    timeZone: userTZ
+  });
+
+  var timeFmt = new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit', minute: '2-digit', hour12: true,
+    timeZone: userTZ
+  });
+
+  // Short TZ abbreviation for display (e.g. "IST", "EST", "PST")
+  var tzAbbr = (function () {
+    try {
+      var parts = new Intl.DateTimeFormat(undefined, {
+        timeZoneName: 'short', timeZone: userTZ
+      }).formatToParts(new Date());
+      var tz = parts.find(function (p) { return p.type === 'timeZoneName'; });
+      return tz ? tz.value : '';
+    } catch (e) { return ''; }
+  })();
+
+  document.querySelectorAll('.al-ts-date[data-utc]').forEach(function (el) {
+    try {
+      var d = new Date(el.dataset.utc);
+      if (!isNaN(d.getTime())) { el.textContent = dateFmt.format(d); }
+    } catch (e) {}
+  });
+
+  document.querySelectorAll('.al-ts-time[data-utc]').forEach(function (el) {
+    try {
+      var d = new Date(el.dataset.utc);
+      if (!isNaN(d.getTime())) {
+        el.textContent = timeFmt.format(d) + (tzAbbr ? ' ' + tzAbbr : '');
+      }
+    } catch (e) {}
+  });
+})();
+
+// Auto-submit filter form on Enter key in search
+document.querySelector('input[name="search"]').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') { e.preventDefault(); this.form.submit(); }
+});
+
+// Preserve role when submitting other filters
+document.getElementById('filterForm').addEventListener('submit', function(e) {
+  const roleHidden = document.getElementById('roleHidden');
+  // role-pill buttons set roleHidden.value before submit, so nothing extra needed
+});
+
+// Highlight search matches in table
+(function(){
+  const q = {{ search | tojson }};
+  if (!q) return;
+  const lower = q.toLowerCase();
+  document.querySelectorAll('#activityTable tbody td').forEach(td => {
+    const text = td.textContent;
+    if (text.toLowerCase().includes(lower)) {
+      td.style.background = 'rgba(99,102,241,0.06)';
+    }
+  });
+})();
+
+// ── Real-Time Activity Log Polling ─────────────────────────────────────────
+// Polls /admin/api/activity-poll every 30 seconds and prepends new rows.
+// Only active on page 1 with no date/search filter (new rows are visible here).
+(function () {
+  var pageNum    = {{ page_num | int }};
+  var dateFilter = {{ date_filter | tojson }};
+  var searchVal  = {{ search | tojson }};
+  if (pageNum !== 1 || dateFilter || searchVal) return;
+
+  var roleFilter   = {{ role_filter   | tojson }};
+  var moduleFilter = {{ module_filter | tojson }};
+
+  // Timezone helpers
+  var _tz    = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  var _dFmt  = new Intl.DateTimeFormat(undefined, { day:'2-digit', month:'short', year:'numeric', timeZone:_tz });
+  var _tFmt  = new Intl.DateTimeFormat(undefined, { hour:'2-digit', minute:'2-digit', hour12:true, timeZone:_tz });
+  var _tzAbbr = (function(){
+    try {
+      var p = new Intl.DateTimeFormat(undefined, { timeZoneName:'short', timeZone:_tz }).formatToParts(new Date());
+      var t = p.find(function(x){ return x.type==='timeZoneName'; });
+      return t ? t.value : '';
+    } catch(e){ return ''; }
+  })();
+
+  function _fmtDate(iso){ try{ return _dFmt.format(new Date(iso)); }catch(e){ return ''; } }
+  function _fmtTime(iso){ try{ return _tFmt.format(new Date(iso))+(_tzAbbr?' '+_tzAbbr:''); }catch(e){ return ''; } }
+  function _esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  function _roleBadge(r) {
+    var rl=(r||'').toLowerCase(), cls='badge-gray';
+    if(rl.indexOf('super')>-1) cls='badge-role-super';
+    else if(rl.indexOf('sub')>-1) cls='badge-role-sub';
+    else if(rl.indexOf('admin')>-1) cls='badge-role-admin';
+    else if(rl.indexOf('dealer')>-1) cls='badge-role-dealer';
+    return '<span class="badge '+cls+'">'+_esc(r)+'</span>';
+  }
+  function _moduleBadge(m) {
+    var ml=(m||'').toLowerCase(), cls='badge-gray';
+    if(ml.indexOf('dealer')>-1) cls='badge-blue';
+    else if(ml.indexOf('user')>-1) cls='badge-purple';
+    else if(ml.indexOf('vehicle')>-1) cls='badge-yellow-soft';
+    else if(ml.indexOf('lead')>-1) cls='badge-green';
+    else if(ml.indexOf('sale')>-1||ml.indexOf('deal')>-1) cls='badge-orange';
+    else if(ml.indexOf('auth')>-1) cls='badge-dark';
+    else if(ml.indexOf('kyc')>-1||ml.indexOf('subadmin')>-1) cls='badge-purple';
+    return '<span class="badge '+cls+'">'+_esc(m)+'</span>';
+  }
+  function _statusBadge(s) {
+    var sl=(s||'success').toLowerCase();
+    var cls=sl==='success'?'badge-green':sl==='failed'?'badge-red':sl==='warning'?'badge-orange':'badge-gray';
+    return '<span class="badge '+cls+'">'+_esc(s||'Success')+'</span>';
+  }
+
+  function _buildRow(log) {
+    var initial=(log.admin_user||'A')[0].toUpperCase();
+    var avatarCls='al-avatar-'+(log.user_role||'Admin').toLowerCase().replace(/\s+/g,'');
+    var tsDate=log.created_at?_fmtDate(log.created_at):'—';
+    var tsTime=log.created_at?_fmtTime(log.created_at):'';
+    return '<tr class="al-row" data-log-id="'+log.id+'" style="animation:al-fadein 0.5s ease;">'+
+      '<td style="color:var(--text-3);font-size:0.75rem;">&#8226;</td>'+
+      '<td>'+_roleBadge(log.user_role)+'</td>'+
+      '<td><div style="display:flex;align-items:center;gap:9px;">'+
+        '<div class="al-avatar '+avatarCls+'">'+initial+'</div>'+
+        '<span style="font-weight:500;font-size:0.85rem;color:var(--text-1);">'+_esc(log.admin_user)+'</span>'+
+      '</div></td>'+
+      '<td style="max-width:360px;"><div style="display:flex;align-items:flex-start;gap:8px;">'+
+        '<div class="al-action-dot" style="margin-top:4px;flex-shrink:0;"></div>'+
+        '<span style="font-size:0.85rem;color:var(--text-1);word-break:break-word;white-space:normal;">'+_esc(log.action)+'</span>'+
+      '</div></td>'+
+      '<td>'+_moduleBadge(log.module)+'</td>'+
+      '<td><div style="font-size:0.8rem;color:var(--text-2);white-space:nowrap;">'+
+        '<span class="al-ts-date">'+tsDate+'</span>'+
+        '<span class="al-ts-time" style="display:block;font-size:0.72rem;color:var(--text-3);margin-top:1px;">'+tsTime+'</span>'+
+      '</div></td>'+
+      '<td><code style="font-size:0.75rem;color:var(--text-2);background:var(--bg-base);padding:3px 8px;border-radius:5px;border:1px solid var(--border);">'+_esc(log.ip_address)+'</code></td>'+
+      '<td><div style="font-size:0.78rem;color:var(--text-2);white-space:nowrap;">'+
+        _esc(log.device||'—')+
+        (log.browser?'<span style="display:block;font-size:0.7rem;color:var(--text-3);">'+_esc(log.browser)+'</span>':'')+
+      '</div></td>'+
+      '<td>'+_statusBadge(log.status)+'</td>'+
+    '</tr>';
+  }
+
+  // Seed maxId from rows already on the page
+  var maxId = 0;
+  document.querySelectorAll('#activityTable tbody tr[data-log-id]').forEach(function(tr){
+    var id = parseInt(tr.dataset.logId||0);
+    if (id > maxId) maxId = id;
+  });
+
+  function poll() {
+    var url = '/admin/api/activity-poll?since_id='+maxId;
+    if (roleFilter)   url += '&role='+encodeURIComponent(roleFilter);
+    if (moduleFilter) url += '&module='+encodeURIComponent(moduleFilter);
+
+    fetch(url, {credentials:'same-origin'})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(data) {
+        if (!data || !data.success || !data.rows.length) return;
+        var tbody = document.querySelector('#activityTable tbody');
+        if (!tbody) return;
+
+        // Remove empty-state placeholder row if present
+        var empty = tbody.querySelector('tr:not([data-log-id])');
+        if (empty) empty.remove();
+
+        // API returns newest-first; reverse so we prepend oldest-first
+        var rows = data.rows.slice().reverse();
+        rows.forEach(function(log) {
+          if (log.id <= maxId) return;
+          tbody.insertAdjacentHTML('afterbegin', _buildRow(log));
+          if (log.id > maxId) maxId = log.id;
+        });
+
+        // Update the total-records stat card (first .al-stat-val)
+        var statEl = document.querySelector('.al-stat-val');
+        if (statEl) statEl.textContent = data.total;
+      })
+      .catch(function(){});
+  }
+
+  setInterval(poll, 30000);
+})();
+</script>
+{% endblock %}
